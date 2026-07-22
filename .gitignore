@@ -1,0 +1,66 @@
+# ========================
+# Maven Build Outputs
+# ========================
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+
+# ========================
+# IDE Configuration
+# ========================
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.eclipse/
+*.project
+*.classpath
+*.settings/
+.factorypath
+
+# ========================
+# OS Generated Files
+# ========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ========================
+# Environment & Secrets
+# ========================
+.env
+*.env
+*.env.local
+*.env.*.local
+secrets/
+**/*secret*
+**/*credentials*
+application-local.yml
+application-local.properties
+
+# ========================
+# LocalStack / AWS State
+# ========================
+.localstack/
+localstack-data/
+*.s3/
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/
+spring.log
+
+# ========================
+# Maven Wrapper (optional - keep if you want reproducible builds)
+# ========================
+# .mvn/
