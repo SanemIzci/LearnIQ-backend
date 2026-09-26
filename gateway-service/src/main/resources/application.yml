@@ -7,15 +7,31 @@ spring:
   cloud:
     gateway:
       routes:
-        - id: auth-service
+        # ── Public auth endpoints (no JWT required) ──────────────────────
+        - id: auth-public
           uri: http://localhost:8081
           predicates:
-            - Path=/api/v1/auth/**,/api/v1/tenants/**
+            - Path=/api/v1/auth/login,/api/v1/auth/refresh
+
+        # ── Protected auth endpoints (JWT required — ADMIN only) ──────────
+        - id: auth-protected
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/auth/register,/api/v1/auth/me
+          filters:
+            - JwtAuthenticationFilter
+
+        # ── Tenant management (open for now) ─────────────────────────────
+        - id: tenant-service
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/tenants/**
+
+        # ── Platform SUPER_ADMIN login (open) ─────────────────────────────
         - id: platform-auth
           uri: http://localhost:8081
           predicates:
             - Path=/api/v1/platform/**
-          # No JwtAuthenticationFilter — login endpoint must be open
         - id: exam-service
           uri: http://localhost:8082
           predicates:
