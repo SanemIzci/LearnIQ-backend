@@ -126,4 +126,26 @@ public class AuthController {
         }
         return ResponseEntity.ok(user);
     }
+
+    // -------------------------------------------------------
+    // POST /api/v1/auth/logout
+    // Refresh token'ı iptal eder. Access token 1 saatte doğal olarak biter.
+    // -------------------------------------------------------
+    @PostMapping("/logout")
+    public ResponseEntity<Map<String, String>> logout(
+            @RequestBody Map<String, String> body,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId) {
+
+        String refreshToken = body.get("refreshToken");
+
+        if (refreshToken == null || tenantId == null) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "refreshToken and tenantId are required"));
+        }
+
+        userService.revokeRefreshToken(tenantId, refreshToken);
+        log.info("User logged out, refresh token revoked for tenant '{}'", tenantId);
+
+        return ResponseEntity.ok(Map.of("message", "Logged out successfully"));
+    }
 }
