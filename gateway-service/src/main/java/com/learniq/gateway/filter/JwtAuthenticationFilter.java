@@ -56,14 +56,23 @@ public class JwtAuthenticationFilter extends AbstractGatewayFilterFactory<JwtAut
                 String role     = claims.get("role", String.class);
                 String userId   = claims.get("userId", String.class);
 
-                // Forward identity headers to downstream microservices
-                ServerHttpRequest mutatedRequest = request.mutate()
-                        .header("X-Tenant-Id", tenantId != null ? tenantId : "")
-                        .header("X-User-Role",  role     != null ? role     : "")
-                        .header("X-User-Id",    userId   != null ? userId   : "")
-                        .build();
+                // SUPER_ADMIN has no tenantId — platform-wide access
+                boolean isSuperAdmin = "SUPER_ADMIN".equals(role);
 
-                return chain.filter(exchange.mutate().request(mutatedRequest).build());
+                if (!isSuperAdmin && (tenantId == null || tenantId.isBlank())) {
+                    return onError(exchange, "Missing tenantId in token", HttpStatus.UNAUTHORIZED);
+                }
+
+                // Forward identity headers to downstream microservices
+                ServerHttpRequest.Builder requestBuilder = request.mutate()
+                        .header("X-User-Role", role   != null ? role   : "")
+                        .header("X-User-Id",   userId != null ? userId : "");
+
+                if (!isSuperAdmin) {
+                    requestBuilder.header("X-Tenant-Id", tenantId);
+                }
+
+                return chain.filter(exchange.mutate().request(requestBuilder.build()).build());
 
             } catch (Exception e) {
                 return onError(exchange, "Invalid or expired JWT token", HttpStatus.UNAUTHORIZED);

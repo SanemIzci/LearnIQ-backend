@@ -93,4 +93,15 @@ public class UserService {
     private void setSchema(String tenantId) {
         jdbcTemplate.execute("SET search_path TO " + tenantId);
     }
+
+    // ---- SUPER_ADMIN: Global User Lookup (public schema) ----
+
+    public Map<String, Object> findGlobalUser(String username) {
+        // Reset to public schema explicitly — no tenant context needed
+        jdbcTemplate.execute("SET search_path TO public");
+        var rows = jdbcTemplate.queryForList(
+                "SELECT id, username, password_hash, role FROM global_users WHERE username = ?",
+                username);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
 }

@@ -38,7 +38,9 @@ public class AccessControlService {
         }
 
         switch (role) {
-            case ADMIN -> { /* ADMIN sees everything — no further check */ }
+            case SUPER_ADMIN -> { /* Platform-wide access — no restrictions */ }
+
+            case ADMIN -> { /* Tenant ADMIN sees all data within their tenant */ }
 
             case TEACHER -> {
                 // Teacher can only access students in their classroom

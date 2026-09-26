@@ -54,4 +54,20 @@ public class JwtService {
                 .parseSignedClaims(token)
                 .getPayload();
     }
+
+    /**
+     * Short-lived token (15 min) for SUPER_ADMIN.
+     * No tenantId — platform-wide access.
+     */
+    public String generateSuperAdminToken(UUID userId, String username) {
+        return Jwts.builder()
+                .subject(username)
+                .claim("userId", userId.toString())
+                .claim("role", "SUPER_ADMIN")
+                // intentionally no tenantId claim
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + 15 * 60 * 1000L)) // 15 minutes
+                .signWith(getKey())
+                .compact();
+    }
 }
