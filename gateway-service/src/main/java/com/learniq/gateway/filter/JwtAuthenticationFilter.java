@@ -3,6 +3,7 @@ package com.learniq.gateway.filter;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilter;
 import org.springframework.cloud.gateway.filter.factory.AbstractGatewayFilterFactory;
 import org.springframework.http.HttpHeaders;
@@ -18,15 +19,14 @@ import javax.crypto.SecretKey;
 @Component
 public class JwtAuthenticationFilter extends AbstractGatewayFilterFactory<JwtAuthenticationFilter.Config> {
 
-    // Matches the secret in auth-service
-    private final String SECRET = "453D2A4B6E5F78813C2F453D2A4B6E5F78813C2F";
+    @Value("${jwt.secret}")
+    private String secret;
 
     public JwtAuthenticationFilter() {
         super(Config.class);
     }
 
-    public static class Config {
-    }
+    public static class Config {}
 
     @Override
     public GatewayFilter apply(Config config) {
@@ -34,7 +34,7 @@ public class JwtAuthenticationFilter extends AbstractGatewayFilterFactory<JwtAut
             ServerHttpRequest request = exchange.getRequest();
 
             if (!request.getHeaders().containsKey(HttpHeaders.AUTHORIZATION)) {
-                return onError(exchange, "No Authorization header present", HttpStatus.UNAUTHORIZED);
+                return onError(exchange, "No Authorization header", HttpStatus.UNAUTHORIZED);
             }
 
             String authHeader = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
@@ -45,7 +45,7 @@ public class JwtAuthenticationFilter extends AbstractGatewayFilterFactory<JwtAut
             String token = authHeader.substring(7);
 
             try {
-                SecretKey key = Keys.hmacShaKeyFor(SECRET.getBytes());
+                SecretKey key = Keys.hmacShaKeyFor(secret.getBytes());
                 Claims claims = Jwts.parser()
                         .verifyWith(key)
                         .build()
@@ -53,26 +53,27 @@ public class JwtAuthenticationFilter extends AbstractGatewayFilterFactory<JwtAut
                         .getPayload();
 
                 String tenantId = claims.get("tenantId", String.class);
+                String role     = claims.get("role", String.class);
+                String userId   = claims.get("userId", String.class);
 
-                if (tenantId != null) {
-                    // Mutate the request to append the tenant ID header for downstream microservices
-                    request = request.mutate()
-                            .header("X-Tenant-ID", tenantId)
-                            .build();
-                }
+                // Forward identity headers to downstream microservices
+                ServerHttpRequest mutatedRequest = request.mutate()
+                        .header("X-Tenant-Id", tenantId != null ? tenantId : "")
+                        .header("X-User-Role",  role     != null ? role     : "")
+                        .header("X-User-Id",    userId   != null ? userId   : "")
+                        .build();
+
+                return chain.filter(exchange.mutate().request(mutatedRequest).build());
 
             } catch (Exception e) {
                 return onError(exchange, "Invalid or expired JWT token", HttpStatus.UNAUTHORIZED);
             }
-
-            // Continue executing the filter chain
-            return chain.filter(exchange.mutate().request(request).build());
         };
     }
 
-    private Mono<Void> onError(ServerWebExchange exchange, String err, HttpStatus httpStatus) {
+    private Mono<Void> onError(ServerWebExchange exchange, String err, HttpStatus status) {
         ServerHttpResponse response = exchange.getResponse();
-        response.setStatusCode(httpStatus);
+        response.setStatusCode(status);
         return response.setComplete();
     }
 }

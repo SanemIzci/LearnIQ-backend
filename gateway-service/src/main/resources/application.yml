@@ -28,3 +28,6 @@ spring:
               - DELETE
               - OPTIONS
             allowedHeaders: "*"
+
+jwt:
+  secret: ${JWT_SECRET:mustBeAtLeast32CharsLongForHS256Security!}

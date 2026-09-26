@@ -7,7 +7,7 @@ spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/learniq_db
     username: learniq_admin
-    password: learniq_password
+    password: ${DB_PASSWORD:learniq_password}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -19,3 +19,6 @@ spring:
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       properties:
         spring.json.add.type.headers: true
+
+jwt:
+  secret: ${JWT_SECRET:mustBeAtLeast32CharsLongForHS256Security!}
