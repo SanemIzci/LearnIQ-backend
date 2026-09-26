@@ -62,13 +62,23 @@ public class AccessControlService {
         }
     }
 
+    /**
+     * Centralised access-control decisions for RBAC.
+     *
+     * SUPER_ADMIN → platform-wide, no restrictions
+     * ADMIN       → all data within their tenant
+     * TEACHER     → only students in ANY of their classrooms (N:N via classroom_teachers)
+     * STUDENT     → only their own data
+     */
     private boolean isStudentInTeacherClassroom(String tenantId, UUID teacherId, UUID studentId) {
         jdbcTemplate.execute("SET search_path TO " + tenantId);
         List<Integer> result = jdbcTemplate.queryForList(
                 """
-                SELECT 1 FROM classroom_students cs
-                JOIN classrooms c ON c.id = cs.classroom_id
-                WHERE c.teacher_id = ? AND cs.student_id = ?
+                SELECT 1
+                FROM classroom_students cs
+                JOIN classroom_teachers ct ON ct.classroom_id = cs.classroom_id
+                WHERE ct.teacher_id = ?
+                  AND cs.student_id = ?
                 LIMIT 1
                 """,
                 Integer.class, teacherId, studentId);
