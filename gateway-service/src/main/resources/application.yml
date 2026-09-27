@@ -35,7 +35,7 @@ spring:
         - id: exam-service
           uri: http://localhost:8082
           predicates:
-            - Path=/api/v1/exams/**,/api/v1/analytics/**
+            - Path=/api/v1/exams/**,/api/v1/analytics/**,/api/v1/classrooms/**
           filters:
             - JwtAuthenticationFilter
       globalcors:
