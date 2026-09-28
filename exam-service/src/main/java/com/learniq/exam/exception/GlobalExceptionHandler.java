@@ -72,6 +72,22 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Handles Spring's ResponseStatusException (e.g. 403 Forbidden, 400 Bad Request)
+     * Thrown by our services and controllers for standard HTTP error mappings.
+     */
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<ApiError> handleResponseStatusException(org.springframework.web.server.ResponseStatusException ex) {
+        log.warn("Response status exception: {} - {}", ex.getStatusCode(), ex.getReason());
+        ApiError error = new ApiError(
+                ex.getStatusCode().value(),
+                ex.getStatusCode().toString(),
+                List.of(ex.getReason() != null ? ex.getReason() : "Error occurred"),
+                LocalDateTime.now()
+        );
+        return ResponseEntity.status(ex.getStatusCode()).body(error);
+    }
+
+    /**
      * Fallback handler for any uncaught exceptions.
      * Returns HTTP 500 without leaking stack trace details to the client.
      */

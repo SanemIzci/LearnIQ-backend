@@ -22,3 +22,11 @@ spring:
 
 jwt:
   secret: ${JWT_SECRET:mustBeAtLeast32CharsLongForHS256Security!}
+
+aws:
+  s3:
+    endpoint: ${AWS_S3_ENDPOINT:http://localhost:4566}
+    region: ${AWS_REGION:us-east-1}
+    access-key: ${AWS_ACCESS_KEY:test}
+    secret-key: ${AWS_SECRET_KEY:test}
+    bucket-name: ${AWS_S3_BUCKET:learniq-reports}
