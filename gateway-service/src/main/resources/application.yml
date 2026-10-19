@@ -32,10 +32,18 @@ spring:
           uri: http://localhost:8081
           predicates:
             - Path=/api/v1/platform/**
+
+        # ── Public exam/share endpoints (no JWT required) ─────────────────
+        - id: exam-public
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/public/**
+
+        # ── Protected exam & student endpoints (JWT required) ─────────────
         - id: exam-service
           uri: http://localhost:8082
           predicates:
-            - Path=/api/v1/exams/**,/api/v1/analytics/**,/api/v1/classrooms/**,/api/v1/reports/**
+            - Path=/api/v1/exams/**,/api/v1/analytics/**,/api/v1/classrooms/**,/api/v1/reports/**,/api/v1/students/**
           filters:
             - JwtAuthenticationFilter
       globalcors:
