@@ -21,4 +21,10 @@ public interface StudentExamResultRepository extends JpaRepository<StudentExamRe
             ORDER BY e.examDate ASC
             """)
     List<StudentExamResult> findByStudentIdOrderByExamDateAsc(@Param("studentId") UUID studentId);
+
+    java.util.Optional<StudentExamResult> findByExamIdAndStudentId(UUID examId, UUID studentId);
+
+    List<StudentExamResult> findByExamIdAndStatus(UUID examId, StudentExamResult.ResultStatus status);
+
+    List<StudentExamResult> findByExamIdAndStatusOrderByTotalScoreDesc(UUID examId, StudentExamResult.ResultStatus status);
 }

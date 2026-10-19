@@ -19,6 +19,7 @@ import java.util.UUID;
 public class ExamController {
 
     private final ExamService examService;
+    private final com.learniq.exam.service.ExamFinalizationService examFinalizationService;
 
     // ── Endpoint #1: Create Exam ───────────────────────────────────────────────
 
@@ -101,5 +102,17 @@ public class ExamController {
     public ResponseEntity<ExamResponse> removeSubject(@PathVariable UUID examId,
                                                       @PathVariable UUID subjectId) {
         return ResponseEntity.ok(examService.removeSubjectFromExam(examId, subjectId));
+    }
+
+    // ── Endpoint #10: Finalize Exam ───────────────────────────────────────────
+
+    /**
+     * POST /api/v1/exams/{examId}/finalize
+     * Closes the exam, calculates rankings/percentiles, and triggers AI reports.
+     */
+    @PostMapping("/{examId}/finalize")
+    public ResponseEntity<Void> finalizeExam(@PathVariable UUID examId) {
+        examFinalizationService.finalizeExam(examId);
+        return ResponseEntity.ok().build();
     }
 }

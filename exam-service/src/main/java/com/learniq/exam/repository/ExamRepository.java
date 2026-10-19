@@ -24,4 +24,14 @@ public interface ExamRepository extends JpaRepository<Exam, UUID> {
      */
     @Query("SELECT e FROM Exam e LEFT JOIN FETCH e.subjects WHERE e.id = :id")
     Optional<Exam> findByIdWithSubjects(UUID id);
+
+    @Query(value = """
+        SELECT e.* FROM exams e
+        JOIN exam_classrooms ec ON e.id = ec.exam_id
+        JOIN classroom_students cs ON ec.classroom_id = cs.classroom_id
+        WHERE cs.student_id = :studentId AND e.status = :status
+        ORDER BY e.exam_date DESC
+    """, nativeQuery = true)
+    List<Exam> findExamsForStudent(@org.springframework.data.repository.query.Param("studentId") UUID studentId,
+                                   @org.springframework.data.repository.query.Param("status") String status);
 }

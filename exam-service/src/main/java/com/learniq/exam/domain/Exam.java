@@ -32,6 +32,17 @@ public class Exam {
     @Column(name = "exam_type", nullable = false, length = 50)
     private String examType;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private ExamStatus status = ExamStatus.OPEN;
+
+    @Column(name = "created_by")
+    private UUID createdBy;
+
+    @Column(name = "finalized_at")
+    private LocalDateTime finalizedAt;
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
         name = "exam_subjects",
@@ -41,7 +52,20 @@ public class Exam {
     @Builder.Default
     private Set<Subject> subjects = new HashSet<>();
 
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(
+        name = "exam_classrooms",
+        joinColumns = @JoinColumn(name = "exam_id")
+    )
+    @Column(name = "classroom_id")
+    @Builder.Default
+    private Set<UUID> classroomIds = new HashSet<>();
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
+
+    public enum ExamStatus {
+        OPEN, FINALIZED
+    }
 }

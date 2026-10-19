@@ -32,6 +32,7 @@
         <spring-cloud.version>2023.0.2</spring-cloud.version>
         <spring-ai.version>1.0.0-M1</spring-ai.version>
         <lombok.version>1.18.34</lombok.version>
+        <argLine>-XX:+EnableDynamicAgentLoading -Djdk.attach.allowAttachSelf=true</argLine>
     </properties>
 
     <dependencyManagement>

@@ -39,7 +39,37 @@ public class StudentExamResult {
     @Column(name = "school_rank")
     private Integer schoolRank;
 
+    @Column(precision = 5, scale = 2)
+    private BigDecimal percentile;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private ResultStatus status = ResultStatus.SUBMITTED;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "entry_method", nullable = false, length = 20)
+    @Builder.Default
+    private EntryMethod entryMethod = EntryMethod.MANUAL;
+
+    @Column(name = "reviewed_by")
+    private UUID reviewedBy;
+
+    @Column(name = "reviewed_at")
+    private LocalDateTime reviewedAt;
+
+    @Column(name = "rejection_reason", length = 500)
+    private String rejectionReason;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
+
+    public enum ResultStatus {
+        SUBMITTED, APPROVED, REJECTED, DRAFT
+    }
+
+    public enum EntryMethod {
+        MANUAL, OCR, TEACHER_BULK
+    }
 }

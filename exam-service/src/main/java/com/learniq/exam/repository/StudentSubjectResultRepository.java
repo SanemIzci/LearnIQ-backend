@@ -21,4 +21,6 @@ public interface StudentSubjectResultRepository extends JpaRepository<StudentSub
             """)
     List<StudentSubjectResult> findByStudentIdAndExamId(@Param("studentId") UUID studentId,
                                                         @Param("examId") UUID examId);
+
+    void deleteByExamIdAndStudentId(UUID examId, UUID studentId);
 }
