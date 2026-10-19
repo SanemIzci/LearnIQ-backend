@@ -17,4 +17,6 @@ public interface AiReportRepository extends JpaRepository<AiReport, UUID> {
     default Optional<AiReport> findFirstReadyByDataHash(String dataHash) {
         return findFirstByDataHashAndStatusOrderByCompletedAtDesc(dataHash, AiReport.ReportStatus.READY);
     }
+
+    boolean existsByStudentIdAndS3Key(UUID studentId, String s3Key);
 }

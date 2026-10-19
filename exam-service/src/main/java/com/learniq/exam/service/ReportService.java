@@ -28,6 +28,7 @@ import java.util.stream.Collectors;
 public class ReportService {
 
     private final S3Client s3Client;
+    private final com.learniq.exam.repository.AiReportRepository aiReportRepository;
 
     @Value("${aws.s3.bucket-name}")
     private String bucketName;
@@ -81,7 +82,15 @@ public class ReportService {
     public String getReport(String tenantId, String studentId, String filename) {
         // Reconstruct full S3 key and validate it belongs to this student
         String key = String.format("reports/%s/%s", tenantId, filename);
-        if (!filename.startsWith("student_" + studentId + "_")) {
+        boolean isDirectOwner = filename.startsWith("student_" + studentId + "_");
+        boolean hasAccessViaAiReport = false;
+        try {
+            hasAccessViaAiReport = aiReportRepository.existsByStudentIdAndS3Key(java.util.UUID.fromString(studentId), key);
+        } catch (Exception e) {
+            // ignore if studentId is not a valid UUID format
+        }
+
+        if (!isDirectOwner && !hasAccessViaAiReport) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Report does not belong to this student");
         }

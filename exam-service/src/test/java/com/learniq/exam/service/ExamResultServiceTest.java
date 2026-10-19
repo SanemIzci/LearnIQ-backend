@@ -115,4 +115,139 @@ public class ExamResultServiceTest {
         assertThat(result.getReviewedBy()).isEqualTo(teacherId);
         assertThat(result.getReviewedAt()).isNotNull();
     }
+
+    @Test
+    void rejectResult_success_setsStatusReasonAndReviewer() {
+        UUID teacherId = UUID.randomUUID();
+        UUID resultId = UUID.randomUUID();
+        StudentExamResult result = StudentExamResult.builder()
+                .id(resultId)
+                .exam(mockExam)
+                .status(StudentExamResult.ResultStatus.SUBMITTED)
+                .build();
+
+        when(studentExamResultRepository.findById(resultId)).thenReturn(Optional.of(result));
+
+        examResultService.rejectResult(examId, resultId, teacherId, "Optik form okunamadı");
+
+        verify(studentExamResultRepository).save(result);
+        assertThat(result.getStatus()).isEqualTo(StudentExamResult.ResultStatus.REJECTED);
+        assertThat(result.getRejectionReason()).isEqualTo("Optik form okunamadı");
+        assertThat(result.getReviewedBy()).isEqualTo(teacherId);
+        assertThat(result.getReviewedAt()).isNotNull();
+    }
+
+    @Test
+    void submitResult_resubmitAfterRejection_replacesOldResultAndSubjects() {
+        ExamResultSubmitRequest request = new ExamResultSubmitRequest();
+        SubjectInputDto input = new SubjectInputDto();
+        input.setSubjectId(subjectId);
+        input.setCorrectCount(30);
+        input.setWrongCount(4);
+        request.setSubjects(List.of(input));
+
+        StudentExamResult rejected = StudentExamResult.builder()
+                .id(UUID.randomUUID())
+                .exam(mockExam)
+                .status(StudentExamResult.ResultStatus.REJECTED)
+                .build();
+
+        when(examRepository.findById(examId)).thenReturn(Optional.of(mockExam));
+        when(studentExamResultRepository.findByExamIdAndStudentId(examId, studentId))
+                .thenReturn(Optional.of(rejected));
+        when(subjectRepository.findById(subjectId)).thenReturn(Optional.of(mockSubject));
+        when(netCalculator.calculateNetScore(any(), any(), anyInt(), anyInt()))
+                .thenReturn(BigDecimal.valueOf(29));
+
+        examResultService.submitResult(examId, studentId, request);
+
+        verify(studentSubjectResultRepository).deleteByExamIdAndStudentId(examId, studentId);
+        verify(studentExamResultRepository).delete(rejected);
+        verify(studentExamResultRepository).flush();
+        verify(studentExamResultRepository).save(any(StudentExamResult.class));
+    }
+
+    @Test
+    void submitResult_existingApprovedResult_throwsAndDoesNotDelete() {
+        ExamResultSubmitRequest request = new ExamResultSubmitRequest();
+        SubjectInputDto input = new SubjectInputDto();
+        input.setSubjectId(subjectId);
+        input.setCorrectCount(30);
+        input.setWrongCount(4);
+        request.setSubjects(List.of(input));
+
+        StudentExamResult approved = StudentExamResult.builder()
+                .id(UUID.randomUUID())
+                .exam(mockExam)
+                .status(StudentExamResult.ResultStatus.APPROVED)
+                .build();
+
+        when(examRepository.findById(examId)).thenReturn(Optional.of(mockExam));
+        when(studentExamResultRepository.findByExamIdAndStudentId(examId, studentId))
+                .thenReturn(Optional.of(approved));
+
+        assertThatThrownBy(() -> examResultService.submitResult(examId, studentId, request))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("onaylanmış");
+
+        verify(studentSubjectResultRepository, never()).deleteByExamIdAndStudentId(any(), any());
+        verify(studentExamResultRepository, never()).save(any(StudentExamResult.class));
+    }
+
+    @Test
+    void approveResult_resultBelongsAnotherExam_throws() {
+        UUID otherExamId = UUID.randomUUID();
+        Exam otherExam = Exam.builder().id(otherExamId).examType("TYT").status(Exam.ExamStatus.OPEN).build();
+        UUID resultId = UUID.randomUUID();
+        StudentExamResult result = StudentExamResult.builder()
+                .id(resultId)
+                .exam(otherExam)
+                .status(StudentExamResult.ResultStatus.SUBMITTED)
+                .build();
+
+        when(studentExamResultRepository.findById(resultId)).thenReturn(Optional.of(result));
+
+        assertThatThrownBy(() -> examResultService.approveResult(examId, resultId, UUID.randomUUID()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("bu sınava ait değil");
+
+        verify(studentExamResultRepository, never()).save(any(StudentExamResult.class));
+    }
+
+    @Test
+    void rejectResult_resultBelongsAnotherExam_throws() {
+        UUID otherExamId = UUID.randomUUID();
+        Exam otherExam = Exam.builder().id(otherExamId).examType("TYT").status(Exam.ExamStatus.OPEN).build();
+        UUID resultId = UUID.randomUUID();
+        StudentExamResult result = StudentExamResult.builder()
+                .id(resultId)
+                .exam(otherExam)
+                .status(StudentExamResult.ResultStatus.SUBMITTED)
+                .build();
+
+        when(studentExamResultRepository.findById(resultId)).thenReturn(Optional.of(result));
+
+        assertThatThrownBy(() -> examResultService.rejectResult(examId, resultId, UUID.randomUUID(), "sebep"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("bu sınava ait değil");
+
+        verify(studentExamResultRepository, never()).save(any(StudentExamResult.class));
+    }
+
+    @Test
+    void approveResult_notFound_throwsEntityNotFound() {
+        UUID resultId = UUID.randomUUID();
+        when(studentExamResultRepository.findById(resultId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> examResultService.approveResult(examId, resultId, UUID.randomUUID()))
+                .isInstanceOf(EntityNotFoundException.class);
+    }
+
+    @Test
+    void submitResult_examNotFound_throwsEntityNotFound() {
+        when(examRepository.findById(examId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> examResultService.submitResult(examId, studentId, new ExamResultSubmitRequest()))
+                .isInstanceOf(EntityNotFoundException.class);
+    }
 }

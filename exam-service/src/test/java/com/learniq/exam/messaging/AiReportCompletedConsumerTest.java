@@ -82,4 +82,46 @@ class AiReportCompletedConsumerTest {
 
         verify(aiReportRepository, never()).save(any());
     }
+
+    @Test
+    @DisplayName("consume - Eksik s3Key içeren mesaj atlanır (DB'ye hiç gidilmez)")
+    void consume_missingS3Key_skips() {
+        UUID reportId = UUID.randomUUID();
+        String jsonMessage = String.format("{\"reportId\":\"%s\",\"summary\":\"x\"}", reportId);
+
+        consumer.consume(jsonMessage);
+
+        verify(aiReportRepository, never()).findById(any(UUID.class));
+        verify(aiReportRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("consume - Geçersiz (UUID olmayan) reportId hata fırlatmaz, kaydetmez")
+    void consume_invalidReportId_handlesGracefully() {
+        String jsonMessage = "{\"reportId\":\"not-a-uuid\",\"s3Key\":\"reports/x.md\"}";
+
+        consumer.consume(jsonMessage);
+
+        verify(aiReportRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("consume - Aynı event iki kez gelirse (at-least-once) rapor READY kalır")
+    void consume_duplicateDelivery_isIdempotent() {
+        UUID reportId = UUID.randomUUID();
+        String jsonMessage = String.format(
+                "{\"reportId\":\"%s\",\"s3Key\":\"reports/x.md\",\"summary\":\"ok\"}", reportId);
+
+        AiReport report = new AiReport();
+        report.setId(reportId);
+        report.setStatus(AiReport.ReportStatus.PENDING);
+        when(aiReportRepository.findById(reportId)).thenReturn(Optional.of(report));
+
+        consumer.consume(jsonMessage);
+        consumer.consume(jsonMessage);
+
+        assertEquals(AiReport.ReportStatus.READY, report.getStatus());
+        assertEquals("reports/x.md", report.getS3Key());
+        verify(aiReportRepository, times(2)).save(report);
+    }
 }

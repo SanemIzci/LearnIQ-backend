@@ -24,6 +24,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -81,5 +83,95 @@ class StudentHomeServiceTest {
         assertEquals("Son Deneme", result.getLatestExam().getTitle());
         assertEquals(1, result.getRecentBadges().size());
         assertEquals("Derece", result.getRecentBadges().get(0).getTitle());
+    }
+
+    private Exam exam(String title, LocalDate date, Exam.ExamStatus status) {
+        Exam e = new Exam();
+        e.setId(UUID.randomUUID());
+        e.setTitle(title);
+        e.setExamDate(date);
+        e.setStatus(status);
+        return e;
+    }
+
+    private StudentExamResult result(UUID studentId, Exam exam, StudentExamResult.ResultStatus status) {
+        StudentExamResult r = new StudentExamResult();
+        r.setStudentId(studentId);
+        r.setExam(exam);
+        r.setStatus(status);
+        r.setTotalScore(new BigDecimal("80.0"));
+        r.setPercentile(new BigDecimal("10.0"));
+        return r;
+    }
+
+    private StudentBadge badge(String code, String title) {
+        StudentBadge sb = new StudentBadge();
+        sb.setBadge(new Badge(code, title, "Açıklama"));
+        sb.setAwardedAt(LocalDateTime.now());
+        return sb;
+    }
+
+    @Test
+    @DisplayName("Kullanıcı bulunamazsa varsayılan isim/sınıf, sınav yok, rozet listesi boş")
+    void getStudentHomeData_userMissing_usesDefaults() {
+        UUID studentId = UUID.randomUUID();
+
+        when(jdbcTemplate.queryForList(anyString(), any(Map.class))).thenReturn(List.of());
+        when(studentExamResultRepository.findAll()).thenReturn(List.of());
+        when(studentBadgeRepository.findLatestBadgesByStudentId(studentId)).thenReturn(List.of());
+
+        StudentHomeResponseDto result = studentHomeService.getStudentHomeData(studentId);
+
+        assertEquals("Öğrenci", result.getStudentName());
+        assertEquals("Atanmamış", result.getClassroomName());
+        assertNull(result.getLatestExam());
+        assertTrue(result.getRecentBadges().isEmpty());
+    }
+
+    @Test
+    @DisplayName("En güncel FINALIZED + APPROVED sınavı seçilir; açık/onaysız sonuçlar yok sayılır")
+    void getStudentHomeData_picksMostRecentFinalizedApprovedExam() {
+        UUID studentId = UUID.randomUUID();
+
+        when(jdbcTemplate.queryForList(anyString(), any(Map.class)))
+                .thenReturn(List.of(Map.of("full_name", "Ali Veli", "classroom_name", "12-A")));
+
+        StudentExamResult older = result(studentId,
+                exam("Eski", LocalDate.of(2026, 1, 1), Exam.ExamStatus.FINALIZED),
+                StudentExamResult.ResultStatus.APPROVED);
+        StudentExamResult newest = result(studentId,
+                exam("Yeni", LocalDate.of(2026, 5, 1), Exam.ExamStatus.FINALIZED),
+                StudentExamResult.ResultStatus.APPROVED);
+        StudentExamResult openExam = result(studentId,
+                exam("Açık", LocalDate.of(2026, 6, 1), Exam.ExamStatus.OPEN),
+                StudentExamResult.ResultStatus.APPROVED);
+        StudentExamResult submitted = result(studentId,
+                exam("Onaysız", LocalDate.of(2026, 7, 1), Exam.ExamStatus.FINALIZED),
+                StudentExamResult.ResultStatus.SUBMITTED);
+
+        when(studentExamResultRepository.findAll()).thenReturn(List.of(older, newest, openExam, submitted));
+        when(studentBadgeRepository.findLatestBadgesByStudentId(studentId)).thenReturn(List.of());
+
+        StudentHomeResponseDto result = studentHomeService.getStudentHomeData(studentId);
+
+        assertNotNull(result.getLatestExam());
+        assertEquals("Yeni", result.getLatestExam().getTitle());
+    }
+
+    @Test
+    @DisplayName("Rozet listesi en fazla 5 ile sınırlanır")
+    void getStudentHomeData_limitsBadgesToFive() {
+        UUID studentId = UUID.randomUUID();
+
+        when(jdbcTemplate.queryForList(anyString(), any(Map.class)))
+                .thenReturn(List.of(Map.of("full_name", "Ali Veli", "classroom_name", "12-A")));
+        when(studentExamResultRepository.findAll()).thenReturn(List.of());
+        when(studentBadgeRepository.findLatestBadgesByStudentId(studentId)).thenReturn(List.of(
+                badge("B1", "Bir"), badge("B2", "İki"), badge("B3", "Üç"),
+                badge("B4", "Dört"), badge("B5", "Beş"), badge("B6", "Altı")));
+
+        StudentHomeResponseDto result = studentHomeService.getStudentHomeData(studentId);
+
+        assertEquals(5, result.getRecentBadges().size());
     }
 }

@@ -55,6 +55,38 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Handles business logic conflict states (e.g., exam closed, already finalized, not finalized yet).
+     * Returns HTTP 409 Conflict.
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiError> handleIllegalStateException(IllegalStateException ex) {
+        log.warn("Business state conflict: {}", ex.getMessage());
+        ApiError error = new ApiError(
+                HttpStatus.CONFLICT.value(),
+                "State Conflict",
+                List.of(ex.getMessage()),
+                LocalDateTime.now()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
+
+    /**
+     * Handles invalid business arguments / calculations (e.g., question count exceeded, invalid token).
+     * Returns HTTP 400 Bad Request.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiError> handleIllegalArgumentException(IllegalArgumentException ex) {
+        log.warn("Invalid business argument: {}", ex.getMessage());
+        ApiError error = new ApiError(
+                HttpStatus.BAD_REQUEST.value(),
+                "Bad Request",
+                List.of(ex.getMessage()),
+                LocalDateTime.now()
+        );
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    /**
      * Handles DB-level unique constraint violations (e.g., duplicate subject name,
      * duplicate student exam result).
      * Returns HTTP 409 Conflict.
