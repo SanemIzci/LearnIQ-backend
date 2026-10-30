@@ -63,14 +63,17 @@ public class JwtAuthenticationFilter extends AbstractGatewayFilterFactory<JwtAut
                     return onError(exchange, "Missing tenantId in token", HttpStatus.UNAUTHORIZED);
                 }
 
-                // Forward identity headers to downstream microservices
+                // Forward identity headers to downstream microservices, strictly overwriting any spoofed client headers
                 ServerHttpRequest.Builder requestBuilder = request.mutate()
-                        .header("X-User-Role", role   != null ? role   : "")
-                        .header("X-User-Id",   userId != null ? userId : "");
-
-                if (!isSuperAdmin) {
-                    requestBuilder.header("X-Tenant-Id", tenantId);
-                }
+                        .headers(httpHeaders -> {
+                            httpHeaders.set("X-User-Role", role != null ? role : "");
+                            httpHeaders.set("X-User-Id",   userId != null ? userId : "");
+                            if (!isSuperAdmin) {
+                                httpHeaders.set("X-Tenant-Id", tenantId);
+                            } else {
+                                httpHeaders.remove("X-Tenant-Id");
+                            }
+                        });
 
                 return chain.filter(exchange.mutate().request(requestBuilder.build()).build());
 

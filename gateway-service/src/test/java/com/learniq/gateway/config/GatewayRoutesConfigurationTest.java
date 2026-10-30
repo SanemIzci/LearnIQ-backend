@@ -110,6 +110,7 @@ class GatewayRoutesConfigurationTest {
         assertTrue(protectedPath.contains("/api/v1/classrooms/**"), "classrooms korumalı olmalı");
         assertTrue(protectedPath.contains("/api/v1/reports/**"), "reports korumalı olmalı");
         assertTrue(protectedPath.contains("/api/v1/students/**"), "students korumalı olmalı");
+        assertTrue(protectedPath.contains("/api/v1/teachers/**"), "teachers korumalı olmalı");
     }
 
     @Test
@@ -154,7 +155,9 @@ class GatewayRoutesConfigurationTest {
                 "/api/v1/exams", "/api/v1/analytics/students/1/history",
                 "/api/v1/classrooms", "/api/v1/reports/students/1",
                 "/api/v1/students/me/home",
-                "/api/v1/subjects");
+                "/api/v1/subjects",
+                "/api/v1/teachers/me/classrooms/1/analytics",
+                "/api/v1/teachers/me/comparison");
         List<String> unrouted = knownPaths.stream()
                 .filter(p -> !matchesAnyPath(p))
                 .toList();

@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector imajı: rag_documents.embedding (vector(1536)) + HNSW index'in dev ortamında
+    # V5 migration DO bloğu tarafından oluşturulabilmesi için gereklidir.
+    image: pgvector/pgvector:pg16
     container_name: learniq-postgres
     ports:
       - "5432:5432"
@@ -10,6 +12,8 @@ services:
       POSTGRES_DB: learniq_db
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Yeni volume'larda extension'ı otomatik açar; mevcut volume'da elle çalıştırın.
+      - ./docker/postgres/init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
     networks:
       - learniq-network
 

@@ -53,6 +53,10 @@ class StudentProfileControllerIntegrationTest {
     @MockBean private com.learniq.exam.service.BadgeService badgeService;
     @MockBean private com.learniq.exam.repository.BadgeRepository badgeRepository;
     @MockBean private com.learniq.exam.repository.StudentBadgeRepository studentBadgeRepository;
+    @MockBean private com.learniq.exam.service.TeacherObservationService teacherObservationService;
+    @MockBean private com.learniq.exam.service.ClassSubjectTrendCalculator classSubjectTrendCalculator;
+    @MockBean private com.learniq.exam.service.SubjectTopicService subjectTopicService;
+    @MockBean private com.learniq.exam.service.TeacherAnalyticsService teacherAnalyticsService;
 
     @Test
     @DisplayName("PUT /api/v1/students/me/leaderboard-consent - 200 OK")

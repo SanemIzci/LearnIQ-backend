@@ -1,0 +1,207 @@
+package com.learniq.exam.service;
+
+import com.learniq.exam.messaging.KafkaAfterCommit;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.*;
+
+/**
+ * EXAM_FINALIZED event'i sonrasında her (sınıf × ders) kombinasyonu için
+ * class_subject_trends tablosunu dolduran/güncelleyen motor.
+ *
+ * Algoritma:
+ * 1. Sınava ait sınıfları bul (classroom_students üzerinden).
+ * 2. Her sınıf + ders için avg_net, avg_score, student_count hesapla.
+ * 3. Bir önceki sınavın avg_net'ini tarih sırasına göre bul → delta hesapla.
+ * 4. ON CONFLICT (classroom_id, subject_id, exam_id) DO UPDATE ile upsert yap.
+ * 5. class-analysis-topic'e CLASS_ANALYSIS_COMPLETED event'i yayımla.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ClassSubjectTrendCalculator {
+
+    private final JdbcTemplate jdbcTemplate;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
+
+    private static final BigDecimal TREND_THRESHOLD = new BigDecimal("0.5");
+
+    @Transactional
+    public void calculate(String tenantId, UUID examId) {
+        setSchema(tenantId);
+        log.info("Trend hesaplama başladı: tenantId={}, examId={}", tenantId, examId);
+
+        // 1. Sınava katılan öğrencilerin bulunduğu sınıfları bul
+        List<UUID> classroomIds = jdbcTemplate.queryForList(
+                """
+                SELECT DISTINCT cs.classroom_id
+                FROM classroom_students cs
+                JOIN student_exam_results ser ON ser.student_id = cs.student_id
+                WHERE ser.exam_id = ? AND ser.status = 'APPROVED'
+                """,
+                UUID.class, examId);
+
+        if (classroomIds.isEmpty()) {
+            log.info("Sınav {} için onaylı sonuç bulunamadı; trend hesaplanmıyor.", examId);
+            return;
+        }
+
+        // 2. Her sınıf için ders bazlı istatistikleri hesapla
+        for (UUID classroomId : classroomIds) {
+            calculateForClassroom(tenantId, examId, classroomId);
+        }
+
+        // 3. CLASS_ANALYSIS_COMPLETED event yayımla (her sınıf için)
+        for (UUID classroomId : classroomIds) {
+            publishAnalysisCompleted(tenantId, examId, classroomId);
+        }
+
+        log.info("Trend hesaplama tamamlandı: examId={}, {} sınıf işlendi.", examId, classroomIds.size());
+    }
+
+    private void calculateForClassroom(String tenantId, UUID examId, UUID classroomId) {
+        // Sınıftaki toplam kayıtlı öğrenci sayısı (expected_student_count)
+        Integer expectedCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM classroom_students WHERE classroom_id = ?",
+                Integer.class, classroomId);
+        int expectedStudentCount = expectedCount != null ? expectedCount : 0;
+
+        // Ders bazlı istatistikler
+        List<Map<String, Object>> subjectStats = jdbcTemplate.queryForList(
+                """
+                SELECT ssr.subject_id,
+                       AVG(ssr.net_score)    AS avg_net,
+                       AVG(ser.total_score)  AS avg_score,
+                       COUNT(DISTINCT ssr.student_id) AS student_count
+                FROM student_subject_results ssr
+                JOIN student_exam_results ser
+                  ON ser.student_id = ssr.student_id AND ser.exam_id = ssr.exam_id
+                JOIN classroom_students cs ON cs.student_id = ssr.student_id
+                WHERE ssr.exam_id = ?
+                  AND cs.classroom_id = ?
+                  AND ser.status = 'APPROVED'
+                GROUP BY ssr.subject_id
+                """,
+                examId, classroomId);
+
+        for (Map<String, Object> row : subjectStats) {
+            UUID subjectId = toUuid(row.get("subject_id"));
+            BigDecimal avgNet = toBigDecimal(row.get("avg_net"));
+            BigDecimal avgScore = toBigDecimal(row.get("avg_score"));
+            int studentCount = toInt(row.get("student_count"));
+
+            BigDecimal participationRate = expectedStudentCount > 0
+                    ? BigDecimal.valueOf(studentCount * 100.0 / expectedStudentCount)
+                            .setScale(2, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+
+            // Bir önceki sınavın avg_net'i
+            BigDecimal previousAvgNet = getPreviousAvgNet(classroomId, subjectId, examId);
+            BigDecimal delta = previousAvgNet != null
+                    ? avgNet.subtract(previousAvgNet).setScale(2, RoundingMode.HALF_UP)
+                    : null;
+
+            String trendDirection = computeTrend(delta);
+
+            upsertTrend(examId, classroomId, subjectId, avgNet, avgScore, studentCount,
+                    expectedStudentCount, participationRate, delta, trendDirection);
+        }
+    }
+
+    /**
+     * Aynı (classroom, subject) çifti için, exam_date bakımından mevcut sınavdan önceki
+     * en son sınavın avg_net değerini döndürür.
+     */
+    private BigDecimal getPreviousAvgNet(UUID classroomId, UUID subjectId, UUID currentExamId) {
+        List<BigDecimal> result = jdbcTemplate.queryForList(
+                """
+                SELECT cst.avg_net
+                FROM class_subject_trends cst
+                JOIN exams e ON e.id = cst.exam_id
+                WHERE cst.classroom_id = ?
+                  AND cst.subject_id   = ?
+                  AND cst.exam_id      != ?
+                  AND e.exam_date < (SELECT exam_date FROM exams WHERE id = ?)
+                ORDER BY e.exam_date DESC, e.created_at DESC
+                LIMIT 1
+                """,
+                BigDecimal.class, classroomId, subjectId, currentExamId, currentExamId);
+
+        return result.isEmpty() ? null : result.get(0);
+    }
+
+    private void upsertTrend(UUID examId, UUID classroomId, UUID subjectId,
+                              BigDecimal avgNet, BigDecimal avgScore, int studentCount,
+                              int expectedStudentCount, BigDecimal participationRate,
+                              BigDecimal delta, String trendDirection) {
+        jdbcTemplate.update(
+                """
+                INSERT INTO class_subject_trends
+                    (classroom_id, subject_id, exam_id,
+                     avg_net, avg_score, student_count,
+                     expected_student_count, participation_rate,
+                     delta_from_previous, trend_direction, calculated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                ON CONFLICT (classroom_id, subject_id, exam_id) DO UPDATE SET
+                    avg_net               = EXCLUDED.avg_net,
+                    avg_score             = EXCLUDED.avg_score,
+                    student_count         = EXCLUDED.student_count,
+                    expected_student_count= EXCLUDED.expected_student_count,
+                    participation_rate    = EXCLUDED.participation_rate,
+                    delta_from_previous   = EXCLUDED.delta_from_previous,
+                    trend_direction       = EXCLUDED.trend_direction,
+                    calculated_at         = NOW()
+                """,
+                classroomId, subjectId, examId,
+                avgNet, avgScore, studentCount,
+                expectedStudentCount, participationRate,
+                delta, trendDirection);
+    }
+
+    private String computeTrend(BigDecimal delta) {
+        if (delta == null) return "STABLE";
+        int cmp = delta.compareTo(TREND_THRESHOLD);
+        if (cmp > 0) return "UP";
+        if (delta.compareTo(TREND_THRESHOLD.negate()) < 0) return "DOWN";
+        return "STABLE";
+    }
+
+    private void publishAnalysisCompleted(String tenantId, UUID examId, UUID classroomId) {
+        Map<String, Object> event = new HashMap<>();
+        event.put("eventType", "CLASS_ANALYSIS_COMPLETED");
+        event.put("tenantId", tenantId);
+        event.put("examId", examId.toString());
+        event.put("classroomId", classroomId.toString());
+        KafkaAfterCommit.send(kafkaTemplate, "class-analysis-topic", event);
+        log.info("CLASS_ANALYSIS_COMPLETED kuyruğa alındı: examId={}, classroomId={}", examId, classroomId);
+    }
+
+    private void setSchema(String tenantId) {
+        jdbcTemplate.execute("SET search_path TO " + com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId));
+    }
+
+    // ── Type-safe helpers ────────────────────────────────────────────────────
+
+    private UUID toUuid(Object val) {
+        if (val == null) return null;
+        return val instanceof UUID u ? u : UUID.fromString(val.toString());
+    }
+
+    private BigDecimal toBigDecimal(Object val) {
+        if (val == null) return BigDecimal.ZERO;
+        if (val instanceof BigDecimal bd) return bd.setScale(2, RoundingMode.HALF_UP);
+        return BigDecimal.valueOf(((Number) val).doubleValue()).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private int toInt(Object val) {
+        if (val == null) return 0;
+        return ((Number) val).intValue();
+    }
+}

@@ -25,7 +25,7 @@ public class ClassroomService {
     // ── Schema switcher ──────────────────────────────────────────────────────
 
     private void setSchema(String tenantId) {
-        jdbcTemplate.execute("SET search_path TO " + tenantId);
+        jdbcTemplate.execute("SET search_path TO " + com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId));
     }
 
     // ── Classroom CRUD ───────────────────────────────────────────────────────

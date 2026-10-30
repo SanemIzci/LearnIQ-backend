@@ -101,4 +101,31 @@ class JwtAuthenticationFilterTest {
         assertEquals(HttpStatus.UNAUTHORIZED, exchange.getResponse().getStatusCode());
         verify(chain, never()).filter(any());
     }
+
+    @Test
+    @DisplayName("Spoofed client headers -> overwritten by JWT claims")
+    void apply_spoofedHeaders_overwrittenByJwtClaims() {
+        String studentId = UUID.randomUUID().toString();
+        String tenantId = "tenant_alpha";
+        String token = generateToken("STUDENT", studentId, tenantId);
+
+        // Attacker attempts to spoof ADMIN role and another tenant
+        MockServerHttpRequest request = MockServerHttpRequest.get("/api/v1/students/me/home")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .header("X-User-Role", "ADMIN")
+                .header("X-Tenant-Id", "tenant_hacked")
+                .build();
+        MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+        filter.apply(new JwtAuthenticationFilter.Config()).filter(exchange, chain).block();
+
+        verify(chain, times(1)).filter(argThat(ex -> {
+            HttpHeaders headers = ex.getRequest().getHeaders();
+            assertEquals("STUDENT", headers.getFirst("X-User-Role"));
+            assertEquals(1, headers.get("X-User-Role").size());
+            assertEquals(tenantId, headers.getFirst("X-Tenant-Id"));
+            assertEquals(1, headers.get("X-Tenant-Id").size());
+            return true;
+        }));
+    }
 }

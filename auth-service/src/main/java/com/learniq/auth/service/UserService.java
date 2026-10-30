@@ -91,7 +91,7 @@ public class UserService {
     // ---- Schema Switcher ----
 
     private void setSchema(String tenantId) {
-        jdbcTemplate.execute("SET search_path TO " + tenantId);
+        jdbcTemplate.execute("SET search_path TO " + com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId));
     }
 
     // ---- SUPER_ADMIN: Global User Lookup (public schema) ----

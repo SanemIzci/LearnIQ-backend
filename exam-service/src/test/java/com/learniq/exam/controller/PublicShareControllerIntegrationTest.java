@@ -55,6 +55,10 @@ class PublicShareControllerIntegrationTest {
     @MockBean private com.learniq.exam.service.BadgeService badgeService;
     @MockBean private com.learniq.exam.repository.BadgeRepository badgeRepository;
     @MockBean private com.learniq.exam.repository.StudentBadgeRepository studentBadgeRepository;
+    @MockBean private com.learniq.exam.service.TeacherObservationService teacherObservationService;
+    @MockBean private com.learniq.exam.service.ClassSubjectTrendCalculator classSubjectTrendCalculator;
+    @MockBean private com.learniq.exam.service.SubjectTopicService subjectTopicService;
+    @MockBean private com.learniq.exam.service.TeacherAnalyticsService teacherAnalyticsService;
 
     @Test
     @DisplayName("GET /api/v1/public/share/{token} - 200 OK")

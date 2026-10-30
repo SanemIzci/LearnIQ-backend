@@ -87,6 +87,10 @@ class ExamControllerIntegrationTest {
     @MockBean private com.learniq.exam.service.BadgeService badgeService;
     @MockBean private com.learniq.exam.repository.BadgeRepository badgeRepository;
     @MockBean private com.learniq.exam.repository.StudentBadgeRepository studentBadgeRepository;
+    @MockBean private com.learniq.exam.service.TeacherObservationService teacherObservationService;
+    @MockBean private com.learniq.exam.service.ClassSubjectTrendCalculator classSubjectTrendCalculator;
+    @MockBean private com.learniq.exam.service.SubjectTopicService subjectTopicService;
+    @MockBean private com.learniq.exam.service.TeacherAnalyticsService teacherAnalyticsService;
 
     private static final UUID EXAM_ID    = UUID.fromString("aaaaaaaa-0000-0000-0000-000000000001");
     private static final UUID STUDENT_ID = UUID.fromString("cccccccc-0000-0000-0000-000000000001");

@@ -63,6 +63,57 @@ public class AccessControlService {
     }
 
     /**
+     * Throws 403 Forbidden if the caller is not allowed to access the given classroomId.
+     * ADMIN / SUPER_ADMIN -> full access
+     * TEACHER -> only classrooms assigned to them in classroom_teachers
+     * STUDENT -> forbidden
+     */
+    public void validateClassroomAccess(String tenantId, UUID requesterId, String rawRole, UUID classroomId) {
+        if (rawRole == null || rawRole.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Missing user role");
+        }
+
+        UserRole role;
+        try {
+            role = UserRole.valueOf(rawRole);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Unknown role: " + rawRole);
+        }
+
+        switch (role) {
+            case SUPER_ADMIN, ADMIN -> {
+                // Tenant ADMIN and platform SUPER_ADMIN have full access
+            }
+            case TEACHER -> {
+                if (!isTeacherAssignedToClassroom(tenantId, requesterId, classroomId)) {
+                    log.warn("TEACHER {} tried to access classroom {} not assigned to them", requesterId, classroomId);
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                            "You do not have access to this classroom");
+                }
+            }
+            case STUDENT -> {
+                log.warn("STUDENT {} tried to access classroom analytics for classroom {}", requesterId, classroomId);
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Students cannot access classroom analytics");
+            }
+        }
+    }
+
+    public boolean isTeacherAssignedToClassroom(String tenantId, UUID teacherId, UUID classroomId) {
+        jdbcTemplate.execute("SET search_path TO " + com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId));
+        List<Integer> result = jdbcTemplate.queryForList(
+                """
+                SELECT 1
+                FROM classroom_teachers
+                WHERE teacher_id = ?
+                  AND classroom_id = ?
+                LIMIT 1
+                """,
+                Integer.class, teacherId, classroomId);
+        return !result.isEmpty();
+    }
+
+    /**
      * Centralised access-control decisions for RBAC.
      *
      * SUPER_ADMIN → platform-wide, no restrictions
@@ -71,7 +122,7 @@ public class AccessControlService {
      * STUDENT     → only their own data
      */
     private boolean isStudentInTeacherClassroom(String tenantId, UUID teacherId, UUID studentId) {
-        jdbcTemplate.execute("SET search_path TO " + tenantId);
+        jdbcTemplate.execute("SET search_path TO " + com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId));
         List<Integer> result = jdbcTemplate.queryForList(
                 """
                 SELECT 1

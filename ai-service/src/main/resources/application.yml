@@ -16,6 +16,16 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  datasource:
+    # ── RAG / pgvector (Faz 4) ──────────────────────────────────────────────
+    # rag_documents her kiracının KENDİ şemasında tutulur (schema-per-tenant izolasyonu);
+    # ingestion consumer'ı ilgili tenant için SET search_path yapıp tek bağlantı havuzunu kullanır.
+    url: ${RAG_DB_URL:jdbc:postgresql://localhost:5432/learniq_db}
+    username: ${RAG_DB_USER:learniq_admin}
+    password: ${RAG_DB_PASSWORD:learniq_password}
+    hikari:
+      pool-name: rag-pool
+      maximum-pool-size: 5
   ai:
     openai:
       base-url: https://openrouter.ai/api
@@ -23,6 +33,19 @@ spring:
       chat:
         options:
           model: google/gemma-4-26b-a4b-it:free
+      # RAG ingestion (Faz 4): embedding provider.
+      # OpenRouter /v1/embeddings desteklemeyebilir; gerekirse base-url/api-key
+      # bağımsız bir embedding sağlayıcısına (ör. OpenAI) env üzerinden yönlendirilir.
+      embedding:
+        options:
+          model: text-embedding-3-small
+
+# ── Faz 5: Admin RAG chat tuning ────────────────────────────────────────────
+rag:
+  chat:
+    top-k: 5
+    similarity-threshold: 0.30
+    at-risk-default-net-threshold: 15.0
 
 aws:
   s3:
