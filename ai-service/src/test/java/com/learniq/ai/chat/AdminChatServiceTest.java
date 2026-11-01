@@ -82,6 +82,7 @@ class AdminChatServiceTest {
                 .function(anyString(), anyString(), any())
                 .function(anyString(), anyString(), any())
                 .function(anyString(), anyString(), any())
+                .function(anyString(), anyString(), any())
                 .call()
                 .content()).thenReturn("Sınıf türevde zorlanıyor.");
 
@@ -107,6 +108,7 @@ class AdminChatServiceTest {
         when(chatClient.prompt()
                 .system(AdminChatService.SYSTEM_PROMPT)
                 .user(anyString())
+                .function(anyString(), anyString(), any())
                 .function(anyString(), anyString(), any())
                 .function(anyString(), anyString(), any())
                 .function(anyString(), anyString(), any())

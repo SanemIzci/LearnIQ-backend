@@ -159,4 +159,35 @@ class AdminChatToolServiceTest {
         assertThat(rows).isEmpty();
         verify(jdbcTemplate).queryForObject(anyString(), eq(UUID.class), eq(classroomId), eq(classroom2));
     }
+
+    @Test
+    @DisplayName("getTenantOverview - şema nitelikli dashboard SQL'i koşar, switchTo çağrılır")
+    void tenantOverview_schemaQualifiedQuery() {
+        when(jdbcTemplate.query(contains(".class_subject_trends t"), any(RowMapper.class)))
+                .thenReturn(List.of(new AdminChatToolService.TenantClassroomOverview(
+                        classroomId, "9A", examId, "TYT Deneme 3",
+                        BigDecimal.valueOf(21.4), BigDecimal.valueOf(90.0),
+                        "Geometri", BigDecimal.valueOf(24.0),
+                        "Sözel Mantık", BigDecimal.valueOf(18.2),
+                        4, 2, 5)));
+
+        List<AdminChatToolService.TenantClassroomOverview> rows = toolService.getTenantOverview(TENANT);
+
+        verify(tenantSchemaService).switchTo(TENANT);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).classroomName()).isEqualTo("9A");
+        assertThat(rows.get(0).avgNet()).isEqualByComparingTo("21.4");
+        assertThat(rows.get(0).upTrendCount()).isEqualTo(4);
+        verify(jdbcTemplate).query(contains(TENANT + ".classrooms"), any(RowMapper.class));
+        verify(jdbcTemplate).query(contains(TENANT + ".exams"), any(RowMapper.class));
+    }
+
+    @Test
+    @DisplayName("getTenantOverview - tenant'ta hiç trend yoksa boş liste döner")
+    void tenantOverview_noRows_returnsEmpty() {
+        when(jdbcTemplate.query(anyString(), any(RowMapper.class))).thenReturn(List.of());
+
+        assertThat(toolService.getTenantOverview(TENANT)).isEmpty();
+        verify(tenantSchemaService).switchTo(TENANT);
+    }
 }

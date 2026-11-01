@@ -15,8 +15,8 @@ import java.util.Map;
  * Admin RAG chat orkestrasyonu (hibrit):
  * 1. Semantik: kullanıcının sorusu embedding edilip rag_documents'ta aranır,
  *    eşikten geçen dokümanlar bağlam bloğu olarak prompt'a eklenir.
- * 2. Sayısal: getClassSubjectTrend / getAtRiskStudents / compareClassrooms
- *    FunctionCallback'leri canlı SQL fact okur (LLM sayı uyduramaz).
+ * 2. Sayısal: getClassSubjectTrend / getAtRiskStudents / compareClassrooms /
+ *    getTenantOverview FunctionCallback'leri canlı SQL fact okur (LLM sayı uyduramaz).
  *
  * Tenant izolasyonu: retrieval + her üç tool istekten parametre olarak gelen
  * doğrulanmış kiracı şeması üzerinde çalışır; chat connection'ları paylaşımlı
@@ -74,6 +74,12 @@ public class AdminChatService {
                         (AdminChatToolService.ComparisonFilter filter) ->
                                 toolService.compareClassrooms(tenantSchema, filter.classroomIds(),
                                         filter.examId()))
+                .function("getTenantOverview",
+                        "Tenant (kurum) geneli özet dashboard döndürür: her sınıfın son denemesindeki "
+                                + "ortalama net, katılım oranı, en güçlü ve en zayıf dersleri ile "
+                                + "UP/DOWN/STABLE trend sayıları. Genel durum sorularında kullan.",
+                        (AdminChatToolService.TenantOverviewFilter filter) ->
+                                toolService.getTenantOverview(tenantSchema))
                 .call()
                 .content();
 

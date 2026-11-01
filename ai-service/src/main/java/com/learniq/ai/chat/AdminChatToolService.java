@@ -44,6 +44,8 @@ public class AdminChatToolService {
 
     public record ComparisonFilter(List<UUID> classroomIds, UUID examId) {}
 
+    public record TenantOverviewFilter() {}
+
     // ── Çıktı kayıtları (LLM'e JSON olarak gider) ─────────────────────────────
 
     public record ClassroomSubjectTrend(
@@ -74,6 +76,21 @@ public class AdminChatToolService {
             BigDecimal avgNet,
             String bestSubject,
             String worstSubject) {}
+
+    public record TenantClassroomOverview(
+            UUID classroomId,
+            String classroomName,
+            UUID examId,
+            String examTitle,
+            BigDecimal avgNet,
+            BigDecimal participationRate,
+            String bestSubject,
+            BigDecimal bestSubjectNet,
+            String worstSubject,
+            BigDecimal worstSubjectNet,
+            long upTrendCount,
+            long downTrendCount,
+            long stableTrendCount) {}
 
     // ── Araç davranışları ────────────────────────────────────────────────────
 
@@ -193,6 +210,62 @@ public class AdminChatToolService {
                 rs.getBigDecimal("avg_net"),
                 rs.getString("best_subject"),
                 rs.getString("worst_subject")), params.toArray());
+    }
+
+    /**
+     * Tenant geneli dashboard özeti (Faz E): her sınıfın son denemesindeki ortalama net,
+     * katılım, en güçlü/zayıf ders ve trend sayıları. İstektene bazlı değil; tüm sınıflar.
+     */
+    public List<TenantClassroomOverview> getTenantOverview(String tenantSchema) {
+        tenantSchemaService.switchTo(tenantSchema);
+
+        String sql = """
+                WITH latest AS (
+                    SELECT DISTINCT ON (t.classroom_id) t.classroom_id, t.exam_id
+                    FROM %1$s.class_subject_trends t
+                    JOIN %1$s.exams e ON e.id = t.exam_id
+                    ORDER BY t.classroom_id, e.exam_date DESC, t.exam_id DESC
+                )
+                SELECT l.classroom_id, c.name AS classroom_name, l.exam_id, e.title AS exam_title,
+                       ROUND(AVG(t.avg_net), 2) AS avg_net,
+                       ROUND(AVG(t.participation_rate), 2) AS participation_rate,
+                       (SELECT s2.name FROM %1$s.class_subject_trends t2
+                          JOIN %1$s.subjects s2 ON s2.id = t2.subject_id
+                         WHERE t2.classroom_id = l.classroom_id AND t2.exam_id = l.exam_id
+                         ORDER BY t2.avg_net DESC LIMIT 1) AS best_subject,
+                       (SELECT MAX(t3.avg_net) FROM %1$s.class_subject_trends t3
+                         WHERE t3.classroom_id = l.classroom_id AND t3.exam_id = l.exam_id) AS best_subject_net,
+                       (SELECT s4.name FROM %1$s.class_subject_trends t4
+                          JOIN %1$s.subjects s4 ON s4.id = t4.subject_id
+                         WHERE t4.classroom_id = l.classroom_id AND t4.exam_id = l.exam_id
+                         ORDER BY t4.avg_net ASC LIMIT 1) AS worst_subject,
+                       (SELECT MIN(t5.avg_net) FROM %1$s.class_subject_trends t5
+                         WHERE t5.classroom_id = l.classroom_id AND t5.exam_id = l.exam_id) AS worst_subject_net,
+                       COUNT(*) FILTER (WHERE t.trend_direction = 'UP') AS up_count,
+                       COUNT(*) FILTER (WHERE t.trend_direction = 'DOWN') AS down_count,
+                       COUNT(*) FILTER (WHERE t.trend_direction = 'STABLE') AS stable_count
+                FROM latest l
+                JOIN %1$s.classrooms c ON c.id = l.classroom_id
+                JOIN %1$s.exams e ON e.id = l.exam_id
+                JOIN %1$s.class_subject_trends t ON t.classroom_id = l.classroom_id AND t.exam_id = l.exam_id
+                GROUP BY l.classroom_id, c.name, l.exam_id, e.title, e.exam_date
+                ORDER BY c.name
+                """.formatted(tenantSchema);
+
+        return jdbcTemplate.query(sql, (rs, rowNum) -> new TenantClassroomOverview(
+                toUuid(rs.getObject("classroom_id")),
+                rs.getString("classroom_name"),
+                toUuid(rs.getObject("exam_id")),
+                rs.getString("exam_title"),
+                rs.getBigDecimal("avg_net"),
+                rs.getBigDecimal("participation_rate"),
+                rs.getString("best_subject"),
+                rs.getBigDecimal("best_subject_net"),
+                rs.getString("worst_subject"),
+                rs.getBigDecimal("worst_subject_net"),
+                rs.getLong("up_count"),
+                rs.getLong("down_count"),
+                rs.getLong("stable_count")));
     }
 
     // ── Varsayılan deneme seçimi ─────────────────────────────────────────────
