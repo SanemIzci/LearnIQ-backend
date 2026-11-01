@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.UUID;
@@ -25,7 +26,14 @@ public class SubjectController {
      * The tenant is resolved automatically via the TenantContext (set by TenantInterceptor).
      */
     @PostMapping
-    public ResponseEntity<SubjectResponse> createSubject(@Valid @RequestBody SubjectRequest request) {
+    public ResponseEntity<SubjectResponse> createSubject(@Valid @RequestBody SubjectRequest request,
+                                                         @RequestHeader(value = "X-User-Role", required = false) String role) {
+        // fail-closed: rol bilgisi yoksa/boşsa ders oluşturma reddedilir
+        if (role == null || role.isBlank()
+                || !"ADMIN".equals(role) && !"SUPER_ADMIN".equals(role) && !"TEACHER".equals(role)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Only teachers and administrators can create subjects.");
+        }
         SubjectResponse response = subjectService.createSubject(request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }

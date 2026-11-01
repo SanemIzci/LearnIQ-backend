@@ -100,17 +100,81 @@ public class AccessControlService {
     }
 
     public boolean isTeacherAssignedToClassroom(String tenantId, UUID teacherId, UUID classroomId) {
-        jdbcTemplate.execute("SET search_path TO " + com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId));
         List<Integer> result = jdbcTemplate.queryForList(
                 """
                 SELECT 1
-                FROM classroom_teachers
+                FROM %s.classroom_teachers
                 WHERE teacher_id = ?
                   AND classroom_id = ?
                 LIMIT 1
-                """,
+                """.formatted(com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId)),
                 Integer.class, teacherId, classroomId);
         return !result.isEmpty();
+    }
+
+    /**
+     * Throws 403 Forbidden if the caller must not modify/operate on the given exam.
+     *
+     * SUPER_ADMIN / ADMIN → full access
+     * TEACHER  → must be a teacher of at least one classroom mapped to the exam
+     *            (exam_classrooms ∩ classroom_teachers). Exams with no classroom
+     *            mapping yet (result-entry flow) are operable by any tenant teacher.
+     * STUDENT  → forbidden
+     */
+    public void validateExamAccess(String tenantId, UUID requesterId, String rawRole, UUID examId) {
+        if (rawRole == null || rawRole.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Missing user role");
+        }
+
+        UserRole role;
+        try {
+            role = UserRole.valueOf(rawRole);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Unknown role: " + rawRole);
+        }
+
+        switch (role) {
+            case SUPER_ADMIN, ADMIN -> {
+                // Tenant ADMIN and platform SUPER_ADMIN have full access
+            }
+            case TEACHER -> {
+                String schema = com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId);
+                List<Integer> assigned = jdbcTemplate.queryForList(
+                        """
+                        SELECT 1
+                        FROM %s.exam_classrooms ec
+                        JOIN %s.classroom_teachers ct ON ct.classroom_id = ec.classroom_id
+                        WHERE ec.exam_id = ?
+                          AND ct.teacher_id = ?
+                        LIMIT 1
+                        """.formatted(schema, schema),
+                        Integer.class, examId, requesterId);
+                if (!assigned.isEmpty()) {
+                    return;
+                }
+
+                List<Integer> anyMapping = jdbcTemplate.queryForList(
+                        """
+                        SELECT 1
+                        FROM %s.exam_classrooms
+                        WHERE exam_id = ?
+                        LIMIT 1
+                        """.formatted(schema),
+                        Integer.class, examId);
+                if (anyMapping.isEmpty()) {
+                    // Sonuç-giriş akışında sınıf eşleşmesi henüz yok; tenant öğretmenine izin verilir.
+                    return;
+                }
+                log.warn("TEACHER {} tried to modify exam {} they are not assigned to", requesterId, examId);
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "You do not have access to this exam");
+            }
+            case STUDENT -> {
+                log.warn("STUDENT {} tried to modify exam {}", requesterId, examId);
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Students cannot modify exams");
+            }
+        }
     }
 
     /**
@@ -122,16 +186,16 @@ public class AccessControlService {
      * STUDENT     → only their own data
      */
     private boolean isStudentInTeacherClassroom(String tenantId, UUID teacherId, UUID studentId) {
-        jdbcTemplate.execute("SET search_path TO " + com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId));
         List<Integer> result = jdbcTemplate.queryForList(
                 """
                 SELECT 1
-                FROM classroom_students cs
-                JOIN classroom_teachers ct ON ct.classroom_id = cs.classroom_id
+                FROM %s.classroom_students cs
+                JOIN %s.classroom_teachers ct ON ct.classroom_id = cs.classroom_id
                 WHERE ct.teacher_id = ?
                   AND cs.student_id = ?
                 LIMIT 1
-                """,
+                """.formatted(com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId),
+                        com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId)),
                 Integer.class, teacherId, studentId);
         return !result.isEmpty();
     }

@@ -120,6 +120,23 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Handles missing identity headers (X-User-Role, X-Tenant-Id, X-User-Id),
+     * which are required by the fail-closed RBAC endpoints. Fail-closed contract:
+     * eksik kimlik header'ı → 400 (istek eksik), yanlış rol → 403.
+     */
+    @ExceptionHandler(org.springframework.web.bind.MissingRequestHeaderException.class)
+    public ResponseEntity<ApiError> handleMissingRequestHeader(org.springframework.web.bind.MissingRequestHeaderException ex) {
+        log.warn("Missing required header: {}", ex.getHeaderName());
+        ApiError error = new ApiError(
+                HttpStatus.BAD_REQUEST.value(),
+                "Bad Request",
+                List.of("Required header '" + ex.getHeaderName() + "' is missing."),
+                LocalDateTime.now()
+        );
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    /**
      * Fallback handler for any uncaught exceptions.
      * Returns HTTP 500 without leaking stack trace details to the client.
      */

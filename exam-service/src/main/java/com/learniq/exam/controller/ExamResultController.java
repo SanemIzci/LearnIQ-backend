@@ -21,6 +21,7 @@ public class ExamResultController {
 
     private final ExamResultService examResultService;
     private final StudentExamResultRepository studentExamResultRepository;
+    private final com.learniq.exam.security.AccessControlService accessControlService;
 
     @PostMapping("/me")
     public ResponseEntity<Void> submitMyResult(@PathVariable UUID examId,
@@ -49,11 +50,11 @@ public class ExamResultController {
     @PostMapping("/{resultId}/approve")
     public ResponseEntity<Void> approveResult(@PathVariable UUID examId,
                                               @PathVariable UUID resultId,
+                                              @RequestHeader("X-Tenant-Id") String tenantId,
                                               @RequestHeader("X-User-Id") String userId,
                                               @RequestHeader("X-User-Role") String role) {
-        if (!"ADMIN".equals(role) && !"TEACHER".equals(role)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+        requireStaffRole(role);
+        accessControlService.validateExamAccess(tenantId, UUID.fromString(userId), role, examId);
         examResultService.approveResult(examId, resultId, UUID.fromString(userId));
         return ResponseEntity.ok().build();
     }
@@ -61,13 +62,20 @@ public class ExamResultController {
     @PostMapping("/{resultId}/reject")
     public ResponseEntity<Void> rejectResult(@PathVariable UUID examId,
                                              @PathVariable UUID resultId,
+                                             @RequestHeader("X-Tenant-Id") String tenantId,
                                              @RequestHeader("X-User-Id") String userId,
                                              @RequestHeader("X-User-Role") String role,
                                              @Valid @RequestBody RejectionRequest request) {
-        if (!"ADMIN".equals(role) && !"TEACHER".equals(role)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
+        requireStaffRole(role);
+        accessControlService.validateExamAccess(tenantId, UUID.fromString(userId), role, examId);
         examResultService.rejectResult(examId, resultId, UUID.fromString(userId), request.getReason());
         return ResponseEntity.ok().build();
+    }
+
+    private void requireStaffRole(String role) {
+        if (!"ADMIN".equals(role) && !"SUPER_ADMIN".equals(role) && !"TEACHER".equals(role)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "Access denied");
+        }
     }
 }

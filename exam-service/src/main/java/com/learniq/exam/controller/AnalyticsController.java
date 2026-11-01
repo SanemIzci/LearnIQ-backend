@@ -29,11 +29,16 @@ public class AnalyticsController {
     @GetMapping("/students/{studentId}/history")
     public ResponseEntity<StudentTrendReportDto> getStudentHistory(
             @PathVariable UUID studentId,
-            @RequestHeader(value = "X-Tenant-Id",  required = false, defaultValue = "public") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @RequestHeader(value = "X-User-Id",    required = false) String userId,
-            @RequestHeader(value = "X-User-Role",  required = false, defaultValue = "STUDENT") String role) {
+            @RequestHeader(value = "X-User-Role",  required = false) String role) {
 
-        UUID requesterId = userId != null ? UUID.fromString(userId) : studentId;
+        // fail-closed: tenant ve rol header'ı zorunlu; default'lar kaldırıldı
+        if (tenantId == null || tenantId.isBlank() || role == null || role.isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "Missing tenant or role");
+        }
+        UUID requesterId = resolveRequesterId(userId, role, studentId);
         accessControlService.validateStudentAccess(tenantId, requesterId, role, studentId);
 
         StudentTrendReportDto report = analyticsService.getStudentTrendReport(studentId);
@@ -50,15 +55,35 @@ public class AnalyticsController {
     @PostMapping("/students/{studentId}/reports/generate")
     public ResponseEntity<Void> generateAiReport(
             @PathVariable UUID studentId,
-            @RequestHeader(value = "X-Tenant-Id",  required = false, defaultValue = "public") String tenantId,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId,
             @RequestHeader(value = "X-User-Id",    required = false) String userId,
-            @RequestHeader(value = "X-User-Role",  required = false, defaultValue = "STUDENT") String role) {
+            @RequestHeader(value = "X-User-Role",  required = false) String role) {
 
-        UUID requesterId = userId != null ? UUID.fromString(userId) : studentId;
+        // fail-closed: tenant ve rol header'ı zorunlu; default'lar kaldırıldı
+        if (tenantId == null || tenantId.isBlank() || role == null || role.isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, "Missing tenant or role");
+        }
+        UUID requesterId = resolveRequesterId(userId, role, studentId);
         accessControlService.validateStudentAccess(tenantId, requesterId, role, studentId);
 
         StudentTrendReportDto report = analyticsService.getStudentTrendReport(studentId);
         analyticsEventPublisher.publishAiReportRequest(studentId, report);
         return ResponseEntity.accepted().build();
+    }
+
+    /**
+     * requesterId yalnızca STUDENT self-check fallback'inde studentId'ye düşebilir;
+     * TEACHER/ADMIN için kullanıcı kimliği zorunludur (aksi halde 403).
+     */
+    private UUID resolveRequesterId(String userId, String role, UUID studentId) {
+        if (userId != null && !userId.isBlank()) {
+            return UUID.fromString(userId);
+        }
+        if ("STUDENT".equals(role)) {
+            return studentId;
+        }
+        throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN, "Missing user id");
     }
 }

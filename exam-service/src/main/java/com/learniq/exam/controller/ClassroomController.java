@@ -28,6 +28,7 @@ import java.util.UUID;
 public class ClassroomController {
 
     private final ClassroomService classroomService;
+    private final com.learniq.exam.security.AccessControlService accessControlService;
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -92,9 +93,11 @@ public class ClassroomController {
     public ResponseEntity<Map<String, Object>> getClassroom(
             @PathVariable UUID id,
             @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader("X-User-Id")    String userId,
             @RequestHeader("X-User-Role")  String role) {
 
         requireAdminOrTeacher(role);
+        accessControlService.validateClassroomAccess(tenantId, UUID.fromString(userId), role, id);
         return ResponseEntity.ok(classroomService.getClassroom(tenantId, id));
     }
 
@@ -141,9 +144,11 @@ public class ClassroomController {
     public ResponseEntity<List<Map<String, Object>>> listTeachers(
             @PathVariable UUID id,
             @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader("X-User-Id")    String userId,
             @RequestHeader("X-User-Role")  String role) {
 
         requireAdminOrTeacher(role);
+        accessControlService.validateClassroomAccess(tenantId, UUID.fromString(userId), role, id);
         return ResponseEntity.ok(classroomService.listTeachers(tenantId, id));
     }
 
@@ -190,9 +195,11 @@ public class ClassroomController {
     public ResponseEntity<List<Map<String, Object>>> listStudents(
             @PathVariable UUID id,
             @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader("X-User-Id")    String userId,
             @RequestHeader("X-User-Role")  String role) {
 
         requireAdminOrTeacher(role);
+        accessControlService.validateClassroomAccess(tenantId, UUID.fromString(userId), role, id);
         return ResponseEntity.ok(classroomService.listStudents(tenantId, id));
     }
 }

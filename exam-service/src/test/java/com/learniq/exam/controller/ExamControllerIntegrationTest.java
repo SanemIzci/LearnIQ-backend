@@ -30,7 +30,8 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -66,6 +67,7 @@ class ExamControllerIntegrationTest {
     private ObjectMapper objectMapper;
 
     @MockBean private ExamService examService;
+    @MockBean private com.learniq.exam.service.ExamFinalizationService examFinalizationService;
     @MockBean private ExamResultService examResultService;
     @MockBean private SubjectService subjectService;
     @MockBean private AnalyticsService analyticsService;
@@ -116,10 +118,48 @@ class ExamControllerIntegrationTest {
         when(examService.createExam(any())).thenReturn(stubResponse);
 
         mockMvc.perform(post("/api/v1/exams")
+                        .header("X-User-Role", "ADMIN")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(EXAM_ID.toString()));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/exams: missing role header should return 400 (fail-closed binding)")
+    void createExam_missingRoleHeader_badRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/exams")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ExamCreateRequest())))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(examService);
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/exams/{id}: STUDENT role should return 403 (fail-closed)")
+    void deleteExam_studentRole_forbidden() throws Exception {
+        mockMvc.perform(delete("/api/v1/exams/{examId}", EXAM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", "cccccccc-0000-0000-0000-000000000001")
+                        .header("X-User-Role", "STUDENT"))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(examService);
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/exams/{id}/finalize: unassigned TEACHER should return 403")
+    void finalizeExam_unassignedTeacher_forbidden() throws Exception {
+        doThrow(new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN, "You do not have access to this exam"))
+                .when(accessControlService)
+                .validateExamAccess(any(), any(), any(), any());
+
+        mockMvc.perform(post("/api/v1/exams/{examId}/finalize", EXAM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", "eeeeeeee-0000-0000-0000-000000000001")
+                        .header("X-User-Role", "TEACHER"))
+                .andExpect(status().isForbidden());
+        verify(examFinalizationService, never()).finalizeExam(any());
     }
 
     @Test
