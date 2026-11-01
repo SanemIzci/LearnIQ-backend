@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -53,13 +54,21 @@ public class UserService {
     // ---- User Registration ----
 
     public UUID registerUser(String tenantId, RegisterRequest req) {
+        // fail-closed rol whitelist: sadece ADMIN | TEACHER | STUDENT kabul edilir
+        String requestedRole = req.getRole() == null ? "" : req.getRole().toUpperCase();
+        if (!List.of("ADMIN", "TEACHER", "STUDENT").contains(requestedRole)) {
+            log.warn("Rejected user registration with invalid role '{}' in tenant '{}'", req.getRole(), tenantId);
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Role must be one of: ADMIN, TEACHER, STUDENT");
+        }
         setSchema(tenantId);
         UUID id = UUID.randomUUID();
         String hash = passwordEncoder.encode(req.getPassword());
         jdbcTemplate.update(
                 "INSERT INTO users (id, username, password_hash, email, full_name, role) VALUES (?, ?, ?, ?, ?, ?)",
-                id, req.getUsername(), hash, req.getEmail(), req.getFullName(), req.getRole().toUpperCase());
-        log.info("Registered new user '{}' with role '{}' in tenant '{}'", req.getUsername(), req.getRole(), tenantId);
+                id, req.getUsername(), hash, req.getEmail(), req.getFullName(), requestedRole);
+        log.info("Registered new user '{}' with role '{}' in tenant '{}'", req.getUsername(), requestedRole, tenantId);
         return id;
     }
 
