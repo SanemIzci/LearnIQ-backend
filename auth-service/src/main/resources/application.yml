@@ -13,7 +13,7 @@ spring:
     hibernate:
       ddl-auto: none
   flyway:
-    locations: classpath:db/migration
+    locations: classpath:db/migration/public
     baseline-on-migrate: true
 
 jwt:

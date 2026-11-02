@@ -42,14 +42,7 @@ public class FlywayTenantConfig {
 
                 // 3. Iterate over each tenant and run tenant-specific migrations
                 for (String tenant : tenants) {
-                    Flyway tenantFlyway = Flyway.configure()
-                            .dataSource(dataSource)
-                            .schemas(tenant) // Set schema to 'tenant_xyz'
-                            .defaultSchema(tenant)
-                            .locations("classpath:db/migration/tenant")
-                            .baselineOnMigrate(true)
-                            .load();
-                    tenantFlyway.migrate();
+                    TenantSchemaMigrator.migrateTenant(dataSource, tenant);
                 }
             }
         };

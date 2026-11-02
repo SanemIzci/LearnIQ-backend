@@ -31,7 +31,15 @@ spring:
         - id: platform-auth
           uri: http://localhost:8081
           predicates:
-            - Path=/api/v1/platform/**
+            - Path=/api/v1/platform/auth/login
+
+        # ── Platform SUPER_ADMIN management (JWT required) ────────────────
+        - id: platform-admin
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/platform/admin/**
+          filters:
+            - JwtAuthenticationFilter
 
         # ── Public exam/share endpoints (no JWT required) ─────────────────
         - id: exam-public

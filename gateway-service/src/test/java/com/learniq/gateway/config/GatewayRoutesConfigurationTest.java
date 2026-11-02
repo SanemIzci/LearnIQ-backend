@@ -78,7 +78,7 @@ class GatewayRoutesConfigurationTest {
     void allExpectedRoutesAreDeclared() {
         assertTrue(routesById.keySet().containsAll(List.of(
                         "auth-public", "auth-protected", "tenant-service",
-                        "platform-auth", "exam-public", "exam-service")),
+                        "platform-auth", "platform-admin", "exam-public", "exam-service")),
                 "Eksik route var. Mevcut: " + routesById.keySet());
     }
 
@@ -120,7 +120,10 @@ class GatewayRoutesConfigurationTest {
         assertTrue(pathExpressionOf("tenant-service").contains("/api/v1/tenants/**"));
 
         assertEquals(AUTH_SERVICE_URI, routesById.get("platform-auth").get("uri"));
-        assertTrue(pathExpressionOf("platform-auth").contains("/api/v1/platform/**"));
+        assertTrue(pathExpressionOf("platform-auth").contains("/api/v1/platform/auth/login"));
+
+        assertEquals(AUTH_SERVICE_URI, routesById.get("platform-admin").get("uri"));
+        assertTrue(pathExpressionOf("platform-admin").contains("/api/v1/platform/admin/**"));
     }
 
     @Test
@@ -130,7 +133,7 @@ class GatewayRoutesConfigurationTest {
             assertTrue(filtersOf(openRoute).isEmpty(),
                     "Public route '" + openRoute + "' JWT filtresi içermemeli ama içeriyor: " + filtersOf(openRoute));
         }
-        for (String protectedRoute : List.of("auth-protected", "exam-service")) {
+        for (String protectedRoute : List.of("auth-protected", "platform-admin", "exam-service")) {
             assertTrue(filtersOf(protectedRoute).contains("JwtAuthenticationFilter"),
                     "Korumalı route '" + protectedRoute + "' JwtAuthenticationFilter içermeli: " + filtersOf(protectedRoute));
         }
@@ -151,6 +154,7 @@ class GatewayRoutesConfigurationTest {
                 "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/register",
                 "/api/v1/auth/me", "/api/v1/auth/logout",
                 "/api/v1/tenants/acme", "/api/v1/platform/auth/login",
+                "/api/v1/platform/admin/tenants", "/api/v1/users",
                 "/api/v1/public/share/abc",
                 "/api/v1/exams", "/api/v1/analytics/students/1/history",
                 "/api/v1/classrooms", "/api/v1/reports/students/1",

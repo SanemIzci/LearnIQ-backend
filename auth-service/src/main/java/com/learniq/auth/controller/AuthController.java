@@ -23,12 +23,14 @@ public class AuthController {
 
     private final JwtService jwtService;
     private final UserService userService;
+    private final com.learniq.auth.service.TenantSubscriptionService tenantSubscriptionService;
 
     // -------------------------------------------------------
     // POST /api/v1/auth/login
     // -------------------------------------------------------
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest request) {
+        tenantSubscriptionService.requireActiveTenant(request.getTenantId());
         Map<String, Object> user = userService.findUserByUsername(request.getTenantId(), request.getUsername());
 
         if (user == null || !(boolean) user.get("active")) {
@@ -62,6 +64,7 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(Map.of("error", "Only ADMIN can register new users"));
         }
+        tenantSubscriptionService.requireActiveTenant(request.getTenantId());
 
         UUID newUserId = userService.registerUser(request.getTenantId(), request);
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -93,6 +96,8 @@ public class AuthController {
         if (record == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
+        // Abonelik süspansiyonu → refresh akışını da kes (Karar 3/C)
+        tenantSubscriptionService.requireActiveTenant(tenantId);
 
         // Rotate refresh token: revoke old, issue new
         userService.revokeRefreshToken(tenantId, token);
