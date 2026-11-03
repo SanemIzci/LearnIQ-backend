@@ -64,3 +64,6 @@ spring.log
 # Maven Wrapper (optional - keep if you want reproducible builds)
 # ========================
 # .mvn/
+
+# local docs
+/docs/
