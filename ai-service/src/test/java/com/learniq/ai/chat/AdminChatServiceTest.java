@@ -36,7 +36,7 @@ class AdminChatServiceTest {
         return new RagDocumentRepository.RagHit("TEACHER_OBSERVATION", UUID.fromString(
                 "00000000-0000-0000-0000-000000000001"),
                 "Türev konusunda sorun var; konu tekrarı planlandı.",
-                Map.of("classroomName", "12-A", "subjectName", "Matematik"), similarity);
+                Map.of("classroomName", "12-A", "subjectName", "Matematik"), similarity, "text-embedding-3-small@1536");
     }
 
     // ── buildUserPrompt (bağlam montajı) ─────────────────────────────────────

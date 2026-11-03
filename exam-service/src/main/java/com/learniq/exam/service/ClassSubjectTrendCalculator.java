@@ -53,20 +53,26 @@ public class ClassSubjectTrendCalculator {
             return;
         }
 
-        // 2. Her sınıf için ders bazlı istatistikleri hesapla
+        // 2. Her sınıf için ders bazlı istatistikleri hesapla (aggregate version üret)
+        Map<UUID, Long> calcVersions = new LinkedHashMap<>();
         for (UUID classroomId : classroomIds) {
-            calculateForClassroom(tenantId, examId, classroomId);
+            calcVersions.put(classroomId, calculateForClassroom(tenantId, examId, classroomId));
         }
 
-        // 3. CLASS_ANALYSIS_COMPLETED event yayımla (her sınıf için)
-        for (UUID classroomId : classroomIds) {
-            publishAnalysisCompleted(tenantId, examId, classroomId);
+        // 3. CLASS_ANALYSIS_COMPLETED event yayımla (her sınıf için, aynı aggregateVersion)
+        for (Map.Entry<UUID, Long> entry : calcVersions.entrySet()) {
+            publishAnalysisCompleted(tenantId, examId, entry.getKey(), entry.getValue());
         }
 
         log.info("Trend hesaplama tamamlandı: examId={}, {} sınıf işlendi.", examId, classroomIds.size());
     }
 
-    private void calculateForClassroom(String tenantId, UUID examId, UUID classroomId) {
+    /**
+     * @return bu (classroom, exam) aggregate'i için monotonik hesaplama version'u.
+     *         Aynı hesaplama TX'inde yazılan tüm fact satırları bu version'u paylaşır.
+     */
+    private long calculateForClassroom(String tenantId, UUID examId, UUID classroomId) {
+        long calcVersion = nextCalcVersion(classroomId, examId);
         // Sınıftaki toplam kayıtlı öğrenci sayısı (expected_student_count)
         Integer expectedCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM classroom_students WHERE classroom_id = ?",
@@ -111,8 +117,16 @@ public class ClassSubjectTrendCalculator {
             String trendDirection = computeTrend(delta);
 
             upsertTrend(examId, classroomId, subjectId, avgNet, avgScore, studentCount,
-                    expectedStudentCount, participationRate, delta, trendDirection);
+                    expectedStudentCount, participationRate, delta, trendDirection, calcVersion);
         }
+        return calcVersion;
+    }
+
+    private long nextCalcVersion(UUID classroomId, UUID examId) {
+        Long current = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(MAX(calc_version), 0) FROM class_subject_trends WHERE classroom_id = ? AND exam_id = ?",
+                Long.class, classroomId, examId);
+        return (current == null ? 0L : current) + 1L;
     }
 
     /**
@@ -140,15 +154,15 @@ public class ClassSubjectTrendCalculator {
     private void upsertTrend(UUID examId, UUID classroomId, UUID subjectId,
                               BigDecimal avgNet, BigDecimal avgScore, int studentCount,
                               int expectedStudentCount, BigDecimal participationRate,
-                              BigDecimal delta, String trendDirection) {
+                              BigDecimal delta, String trendDirection, long calcVersion) {
         jdbcTemplate.update(
                 """
                 INSERT INTO class_subject_trends
                     (classroom_id, subject_id, exam_id,
                      avg_net, avg_score, student_count,
                      expected_student_count, participation_rate,
-                     delta_from_previous, trend_direction, calculated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                     delta_from_previous, trend_direction, calc_version, calculated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
                 ON CONFLICT (classroom_id, subject_id, exam_id) DO UPDATE SET
                     avg_net               = EXCLUDED.avg_net,
                     avg_score             = EXCLUDED.avg_score,
@@ -157,12 +171,13 @@ public class ClassSubjectTrendCalculator {
                     participation_rate    = EXCLUDED.participation_rate,
                     delta_from_previous   = EXCLUDED.delta_from_previous,
                     trend_direction       = EXCLUDED.trend_direction,
+                    calc_version          = EXCLUDED.calc_version,
                     calculated_at         = NOW()
                 """,
                 classroomId, subjectId, examId,
                 avgNet, avgScore, studentCount,
                 expectedStudentCount, participationRate,
-                delta, trendDirection);
+                delta, trendDirection, calcVersion);
     }
 
     private String computeTrend(BigDecimal delta) {
@@ -173,14 +188,25 @@ public class ClassSubjectTrendCalculator {
         return "STABLE";
     }
 
-    private void publishAnalysisCompleted(String tenantId, UUID examId, UUID classroomId) {
-        Map<String, Object> event = new HashMap<>();
-        event.put("eventType", "CLASS_ANALYSIS_COMPLETED");
-        event.put("tenantId", tenantId);
-        event.put("examId", examId.toString());
-        event.put("classroomId", classroomId.toString());
-        KafkaAfterCommit.send(kafkaTemplate, "class-analysis-topic", event);
-        log.info("CLASS_ANALYSIS_COMPLETED kuyruğa alındı: examId={}, classroomId={}", examId, classroomId);
+    private void publishAnalysisCompleted(String tenantId, UUID examId, UUID classroomId, long calcVersion) {
+        com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId);
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("examId", examId.toString());
+        payload.put("classroomId", classroomId.toString());
+
+        Map<String, Object> event = com.learniq.common.messaging.RagEvent.envelope(
+                "CLASS_ANALYSIS_COMPLETED", tenantId, aggregateId(classroomId, examId), calcVersion, payload);
+
+        // Partition key = aggregateId (classroom × exam) → aynı analiz eventleri sıralı.
+        KafkaAfterCommit.send(kafkaTemplate, "class-analysis-topic",
+                aggregateId(classroomId, examId), event);
+        log.info("CLASS_ANALYSIS_COMPLETED kuyruğa alındı: examId={}, classroomId={}, version={}",
+                examId, classroomId, calcVersion);
+    }
+
+    private String aggregateId(UUID classroomId, UUID examId) {
+        return classroomId + ":" + examId;
     }
 
     private void setSchema(String tenantId) {

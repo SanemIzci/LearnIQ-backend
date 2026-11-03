@@ -1,6 +1,9 @@
 package com.learniq.ai.config;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
@@ -22,10 +25,10 @@ import java.util.Map;
  * RAG ingestion pipeline'ı için Kafka hata stratejisi:
  * - Geçici hatalar (DB bağlantısı, embedding sağlayıcı vs.) → üstel backoff ile 3 kez retry
  * - Kalıcı hatalar (bozuk mesaj, eksik alan, geçersiz kiracı) → retry edilmeden anında DLT
- * - 3 retry sonucu düzelmemiş hata → <topic>.DLT'ye yayınlanır (izlenebilirlik + yeniden işleme)
+ * - 3 retry sonucu düzelmemiş hata → <topic>.DLT'ye yayınlanır (izlenebilirlik + kontrollü replay)
  *
- * DLT mesajları ayrı bir JsonSerializer'lı template ile yazılır; çünkü ana producer
- * StringSerializer kullandığı için Map tipinde event payload'ını serialize edemez.
+ * DLT mesajları ayrı bir JsonSerializer'lı template ile yazılır; ayrıca her DLT
+ * yayını için Micrometer counter artırılır (monitoring/alerting).
  */
 @Configuration
 public class RagKafkaErrorHandlerConfig {
@@ -39,19 +42,33 @@ public class RagKafkaErrorHandlerConfig {
     }
 
     @Bean
-    public DeadLetterPublishingRecoverer ragDeadLetterPublisher(KafkaTemplate<String, Object> dltKafkaTemplate) {
+    public DeadLetterPublishingRecoverer ragDeadLetterPublisher(
+            KafkaTemplate<String, Object> dltKafkaTemplate, MeterRegistry meterRegistry) {
+        Counter dltCounter = meterRegistry.counter("rag.ingest.dlt");
         return new DeadLetterPublishingRecoverer(dltKafkaTemplate,
-                (record, ex) -> new TopicPartition(record.topic() + ".DLT", record.partition()));
+                (record, ex) -> new TopicPartition(record.topic() + ".DLT", record.partition())) {
+            @Override
+            public void accept(ConsumerRecord<?, ?> record, Exception ex) {
+                dltCounter.increment();
+                super.accept(record, ex);
+            }
+        };
     }
 
     @Bean
-    public DefaultErrorHandler ragDefaultErrorHandler(DeadLetterPublishingRecoverer recoverer) {
+    public DefaultErrorHandler ragDefaultErrorHandler(DeadLetterPublishingRecoverer recoverer,
+                                                      MeterRegistry meterRegistry) {
+        Counter retryCounter = meterRegistry.counter("rag.ingest.retries");
         ExponentialBackOffWithMaxRetries backOff = new ExponentialBackOffWithMaxRetries(3);
         backOff.setInitialInterval(1_000L);
         backOff.setMultiplier(2.0);
         backOff.setMaxInterval(8_000L);
 
-        DefaultErrorHandler handler = new DefaultErrorHandler(recoverer, backOff);
+        DefaultErrorHandler handler = new DefaultErrorHandler(
+                (record, ex) -> {
+                    retryCounter.increment();
+                    recoverer.accept(record, ex);
+                }, backOff);
 
         // Kalıcı hatalar: retry anlamsız
         handler.addNotRetryableExceptions(
@@ -59,12 +76,18 @@ public class RagKafkaErrorHandlerConfig {
                 IllegalArgumentException.class,
                 DataIntegrityViolationException.class);
 
+        handler.setRetryListeners((record, ex, deliveryAttempt) -> {
+            if (deliveryAttempt > 1) {
+                retryCounter.increment();
+            }
+        });
+
         return handler;
     }
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, Object> ragListenerContainerFactory(
-            ConsumerFactory<String, Object> consumerFactory,
+            ConsumerFactory<Object, Object> consumerFactory,
             DefaultErrorHandler ragDefaultErrorHandler) {
 
         ConcurrentKafkaListenerContainerFactory<String, Object> factory =

@@ -1,6 +1,7 @@
 package com.learniq.ai.chat;
 
 import com.learniq.ai.rag.RagDocumentRepository;
+import com.learniq.ai.rag.RagMetrics;
 import com.learniq.ai.rag.TenantSchemaService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,18 +35,22 @@ class RagRetrievalServiceTest {
     @Mock
     private EmbeddingModel embeddingModel;
 
+    @Mock
+    private RagMetrics ragMetrics;
+
     private RagRetrievalService ragRetrievalService;
 
     @BeforeEach
     void setUp() {
-        ragRetrievalService = new RagRetrievalService(tenantSchemaService, ragDocumentRepository, embeddingModel);
+        ragRetrievalService = new RagRetrievalService(tenantSchemaService, ragDocumentRepository, embeddingModel, ragMetrics);
         ReflectionTestUtils.setField(ragRetrievalService, "topK", 5);
         ReflectionTestUtils.setField(ragRetrievalService, "similarityThreshold", 0.30);
+        ReflectionTestUtils.setField(ragRetrievalService, "allowedModelSigs", "");
     }
 
     private RagDocumentRepository.RagHit hit(double similarity) {
         return new RagDocumentRepository.RagHit("TEACHER_OBSERVATION", UUID.randomUUID(),
-                "gözlem", Map.of("classroomName", "12-A"), similarity);
+                "gözlem", Map.of("classroomName", "12-A"), similarity, "text-embedding-3-small@1536");
     }
 
     @Test
@@ -53,7 +58,7 @@ class RagRetrievalServiceTest {
     void retrieve_filtersByThreshold() {
         when(ragDocumentRepository.embeddingColumnExists(TENANT)).thenReturn(true);
         when(embeddingModel.embed("türev sorusu")).thenReturn(List.of(0.1, 0.2));
-        when(ragDocumentRepository.search(eq(TENANT), eq(List.of(0.1, 0.2)), eq(null), eq(null), eq(5)))
+        when(ragDocumentRepository.search(eq(TENANT), eq(List.of(0.1, 0.2)), eq(null), eq(null), eq(5), eq(List.of())))
                 .thenReturn(List.of(hit(0.82), hit(0.29)));
 
         List<RagDocumentRepository.RagHit> result =
@@ -71,12 +76,12 @@ class RagRetrievalServiceTest {
         UUID subjectId = UUID.randomUUID();
         when(ragDocumentRepository.embeddingColumnExists(TENANT)).thenReturn(true);
         when(embeddingModel.embed(anyString())).thenReturn(List.of(0.5));
-        when(ragDocumentRepository.search(eq(TENANT), anyList(), eq(classroomId), eq(subjectId), eq(5)))
+        when(ragDocumentRepository.search(eq(TENANT), anyList(), eq(classroomId), eq(subjectId), eq(5), eq(List.of())))
                 .thenReturn(List.of());
 
         ragRetrievalService.retrieve(TENANT, "soru", classroomId, subjectId);
 
-        verify(ragDocumentRepository).search(eq(TENANT), anyList(), eq(classroomId), eq(subjectId), eq(5));
+        verify(ragDocumentRepository).search(eq(TENANT), anyList(), eq(classroomId), eq(subjectId), eq(5), eq(List.of()));
     }
 
     @Test
@@ -89,6 +94,6 @@ class RagRetrievalServiceTest {
 
         assertThat(result).isEmpty();
         verify(embeddingModel, never()).embed(anyString());
-        verify(ragDocumentRepository, never()).search(anyString(), anyList(), any(), any(), anyInt());
+        verify(ragDocumentRepository, never()).search(anyString(), anyList(), any(), any(), anyInt(), anyList());
     }
 }

@@ -60,6 +60,13 @@ class ClassSubjectTrendCalculatorTest {
                 .thenReturn(count);
     }
 
+    /** calc_version sorgusu: queryForObject(String, Class, Object...) — 2 vararg */
+    private void stubCalcVersion(long version) {
+        when(jdbcTemplate.queryForObject(contains("COALESCE(MAX(calc_version)"),
+                eq(Long.class), eq(classroomId), eq(examId)))
+                .thenReturn(version);
+    }
+
     /** subject stats sorgusu: queryForList(String, Object...) — 2 vararg (examId, classroomId) */
     private void stubSubjectStats(List<Map<String, Object>> rows) {
         doReturn(rows).when(jdbcTemplate)
@@ -78,14 +85,13 @@ class ClassSubjectTrendCalculatorTest {
     private void stubUpsert() {
         doReturn(1).when(jdbcTemplate)
                 .update(contains("class_subject_trends"),
-                        any(), any(), any(),
-                        any(), any(),
+                        any(), any(), any(), any(), any(),
                         anyInt(), anyInt(),
-                        any(), any(), any());
+                        any(), nullable(Object.class), any(), anyLong());
     }
 
     private void stubKafka() {
-        when(kafkaTemplate.send(anyString(), any())).thenReturn(null);
+        when(kafkaTemplate.send(anyString(), anyString(), any())).thenReturn(null);
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
@@ -107,6 +113,7 @@ class ClassSubjectTrendCalculatorTest {
         stubSchemaSet();
         stubClassroomIds(List.of(classroomId));
         stubExpectedCount(30);
+        stubCalcVersion(1L);
 
         Map<String, Object> subjectRow = Map.of(
                 "subject_id",    subjectId.toString(),
@@ -122,10 +129,9 @@ class ClassSubjectTrendCalculatorTest {
         calculator.calculate(tenantId, examId);
 
         verify(jdbcTemplate, atLeastOnce()).update(contains("class_subject_trends"),
-                any(), any(), any(),
-                any(), any(),
+                any(), any(), any(), any(), any(),
                 anyInt(), anyInt(),
-                any(), any(), any());
+                any(), nullable(Object.class), any(), anyLong());
     }
 
     @Test
@@ -134,6 +140,7 @@ class ClassSubjectTrendCalculatorTest {
         stubSchemaSet();
         stubClassroomIds(List.of(classroomId));
         stubExpectedCount(25);
+        stubCalcVersion(1L);
 
         Map<String, Object> subjectRow = Map.of(
                 "subject_id",    subjectId.toString(),
@@ -151,7 +158,7 @@ class ClassSubjectTrendCalculatorTest {
 
         // trend_direction = "UP" argümanı doğrulanıyor
         verify(jdbcTemplate).update(anyString(), any(), any(), any(),
-                any(), any(), anyInt(), anyInt(), any(), any(), eq("UP"));
+                any(), any(), anyInt(), anyInt(), any(), nullable(Object.class), eq("UP"), anyLong());
     }
 
     @Test
@@ -160,6 +167,7 @@ class ClassSubjectTrendCalculatorTest {
         stubSchemaSet();
         stubClassroomIds(List.of(classroomId));
         stubExpectedCount(25);
+        stubCalcVersion(1L);
 
         Map<String, Object> subjectRow = Map.of(
                 "subject_id",    subjectId.toString(),
@@ -176,7 +184,7 @@ class ClassSubjectTrendCalculatorTest {
         calculator.calculate(tenantId, examId);
 
         verify(jdbcTemplate).update(anyString(), any(), any(), any(),
-                any(), any(), anyInt(), anyInt(), any(), any(), eq("DOWN"));
+                any(), any(), anyInt(), anyInt(), any(), nullable(Object.class), eq("DOWN"), anyLong());
     }
 
     @Test
@@ -185,6 +193,7 @@ class ClassSubjectTrendCalculatorTest {
         stubSchemaSet();
         stubClassroomIds(List.of(classroomId));
         stubExpectedCount(20);
+        stubCalcVersion(1L);
 
         Map<String, Object> subjectRow = Map.of(
                 "subject_id",    subjectId.toString(),
@@ -200,6 +209,6 @@ class ClassSubjectTrendCalculatorTest {
         calculator.calculate(tenantId, examId);
 
         verify(jdbcTemplate).update(anyString(), any(), any(), any(),
-                any(), any(), anyInt(), anyInt(), any(), isNull(), eq("STABLE"));
+                any(), any(), anyInt(), anyInt(), any(), nullable(Object.class), eq("STABLE"), anyLong());
     }
 }

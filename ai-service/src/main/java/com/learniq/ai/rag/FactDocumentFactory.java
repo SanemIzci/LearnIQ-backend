@@ -111,6 +111,7 @@ public final class FactDocumentFactory {
                 deterministicUuid(row.classroomId(), row.subjectId(), row.examId()),
                 row.classroomId(),
                 row.subjectId(),
+                row.examId(),
                 normalize(content.toString()),
                 metadata);
     }
@@ -146,6 +147,7 @@ public final class FactDocumentFactory {
                 row.observationId(),
                 row.classroomId(),
                 row.subjectId(),
+                row.examId(),
                 normalize(content.toString()),
                 metadata);
     }
@@ -158,6 +160,7 @@ public final class FactDocumentFactory {
             UUID sourceId,
             UUID classroomId,
             UUID subjectId,
+            UUID examId,
             String content,
             Map<String, Object> metadata) {}
 

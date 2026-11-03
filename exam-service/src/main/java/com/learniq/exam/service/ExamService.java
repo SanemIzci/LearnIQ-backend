@@ -11,10 +11,13 @@ import com.learniq.exam.repository.ExamRepository;
 import com.learniq.exam.repository.SubjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -24,6 +27,7 @@ public class ExamService {
 
     private final ExamRepository examRepository;
     private final SubjectRepository subjectRepository;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
     // ── Endpoint #1: Create Exam ───────────────────────────────────────────────
 
@@ -89,7 +93,21 @@ public class ExamService {
         if (!examRepository.existsById(examId)) {
             throw new EntityNotFoundException("Exam", examId);
         }
+        String tenantSchema = com.learniq.common.tenant.TenantContext.getCurrentTenant();
         examRepository.deleteById(examId);
+
+        // RAG reconciliation: sınav silinince türetilen fact dokümanları tombstone'lanır.
+        // DELETE aggregate'i terminal olduğu için version = duvar saati (monotonik üstünlük).
+        if (tenantSchema != null && !tenantSchema.isBlank()) {
+            com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantSchema);
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("examId", examId.toString());
+            Map<String, Object> event = com.learniq.common.messaging.RagEvent.envelope(
+                    "EXAM_DELETED", tenantSchema, "exam:" + examId,
+                    System.currentTimeMillis(), payload);
+            com.learniq.exam.messaging.KafkaAfterCommit.send(
+                    kafkaTemplate, "class-analysis-topic", "exam:" + examId, event);
+        }
         log.info("Deleted exam id={}", examId);
     }
 

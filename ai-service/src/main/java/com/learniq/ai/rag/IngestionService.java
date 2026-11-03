@@ -4,10 +4,10 @@ import com.learniq.common.tenant.TenantSchemaValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Date;
 import java.sql.Timestamp;
@@ -20,11 +20,12 @@ import java.util.UUID;
 /**
  * RAG ingestion orkestrasyonu.
  *
- * Akış: Kafka event → tenant şemasına geç → fact'leri doğrudan şemadan oku
- *       → kanonik doküman üret → SHA-256 idempotency → embedding → pgvector upsert.
+ * Akış: Kafka event → tenant şemasından fact oku → kanonik doküman üret
+ *       → SHA-256 + model imzası idempotency → embedding (DB transaction DIŞINDA)
+ *       → version-aware atomik upsert (DB koşulu: saklanan version <= gelen version).
  *
- * Sayısal doğruluk kuralı: Fact tamamen tenant şemasındaki class_subject_trends
- * tablosundan okunur; embedding üretimi yorum/işlem içermez.
+ * Not: DB transaction açıkken embedding çağrılmaz; sıralama/atomiklik in-memory
+ * lock'a değil, PostgreSQL'in tek-statement koşullu yazımına dayanır (dağıtık-safe).
  */
 @Slf4j
 @Service
@@ -35,15 +36,24 @@ public class IngestionService {
     private final RagDocumentRepository ragDocumentRepository;
     private final EmbeddingModel embeddingModel;
     private final JdbcTemplate jdbcTemplate;
+    private final RagMetrics ragMetrics;
+
+    @Value("${rag.embedding.model-sig:text-embedding-3-small@1536}")
+    private String embeddingModelSig;
+
+    @Value("${rag.embedding.dimensions:1536}")
+    private Integer embeddingDims;
 
     // ── CLASS_ANALYSIS_COMPLETED ─────────────────────────────────────────────
 
-    @Transactional
+    /** Geriye dönük uyumluluk (legacy zarf): version = 0. */
     public void ingestClassAnalysis(String tenantSchema, UUID examId, UUID classroomId) {
+        ingestClassAnalysis(tenantSchema, examId, classroomId, 0L);
+    }
+
+    public void ingestClassAnalysis(String tenantSchema, UUID examId, UUID classroomId, long aggregateVersion) {
         tenantSchemaService.switchTo(tenantSchema);
 
-        // Kirim analiz satırları + isim zenginleştirmesi (yorum yok, ham fact)
-        // SQL, doğrulanmış şema adıyla NİTELİKLİ tablo kullanır (search_path havuzda güvenilmez).
         List<Map<String, Object>> trendRows = jdbcTemplateTrendRows(tenantSchema, examId, classroomId);
         if (trendRows.isEmpty()) {
             log.info("Trend satırı bulunamadı; ingestion atlandı. examId={}, classroomId={}", examId, classroomId);
@@ -55,6 +65,7 @@ public class IngestionService {
 
         int embedded = 0;
         int skipped = 0;
+        int stale = 0;
         for (Map<String, Object> row : trendRows) {
             UUID subjectId = toUuid(row.get("subject_id"));
             UUID rowExamId = toUuid(row.get("exam_id"));
@@ -80,20 +91,27 @@ public class IngestionService {
 
             FactDocumentFactory.FactDocument doc = FactDocumentFactory.classAnalysisFact(factRow);
 
-            if (ingestDoc(doc, tenantSchema)) {
+            IngestResult result = ingestDoc(doc, tenantSchema, aggregateVersion);
+            if (result == IngestResult.EMBEDDED) {
                 embedded++;
-            } else {
+            } else if (result == IngestResult.SKIPPED) {
                 skipped++;
+            } else {
+                stale++;
             }
         }
-        log.info("Sınıf analizi ingestion tamamlandı: examId={} classroomId={} → embedded={}, hash-aynı-atlandı={}",
-                examId, classroomId, embedded, skipped);
+        log.info("Sınıf analizi ingestion tamamlandı: examId={} classroomId={} version={} → embedded={}, hash/model-aynı={}, stale={}",
+                examId, classroomId, aggregateVersion, embedded, skipped, stale);
     }
 
     // ── TEACHER_OBSERVATION_CREATED / UPDATED ────────────────────────────────
 
-    @Transactional
+    /** Geriye dönük uyumluluk (legacy zarf): version = 0. */
     public void ingestObservation(String tenantSchema, UUID observationId) {
+        ingestObservation(tenantSchema, observationId, 0L);
+    }
+
+    public void ingestObservation(String tenantSchema, UUID observationId, long aggregateVersion) {
         tenantSchemaService.switchTo(tenantSchema);
 
         Map<String, Object> obs;
@@ -101,7 +119,7 @@ public class IngestionService {
             obs = jdbcTemplate.queryForMap(
                     """
                     SELECT o.id, o.teacher_id, o.classroom_id, o.subject_id, o.exam_id, o.content,
-                           o.tags, o.created_at,
+                           o.tags::text AS tags, o.created_at, o.version,
                            c.name AS classroom_name,
                            (SELECT s.name FROM %1$s.subjects s WHERE s.id = o.subject_id) AS subject_name
                     FROM %1$s.teacher_observations o
@@ -128,42 +146,82 @@ public class IngestionService {
                 toLocalDateTime(obs.get("created_at")));
 
         FactDocumentFactory.FactDocument doc = FactDocumentFactory.observationDocument(row);
-        boolean embedded = ingestDoc(doc, tenantSchema);
-        log.info("Gözlem ingestion: id={} → {}", observationId, embedded ? "indexlendi" : "hash aynı, atlandı");
+        IngestResult result = ingestDoc(doc, tenantSchema, aggregateVersion);
+        log.info("Gözlem ingestion: id={} version={} → {}", observationId, aggregateVersion, result);
     }
 
     // ── TEACHER_OBSERVATION_DELETED ──────────────────────────────────────────
 
-    @Transactional
+    /** Geriye dönük uyumluluk (legacy zarf): version = 0. */
     public void deleteObservation(String tenantSchema, UUID observationId) {
-        tenantSchemaService.switchTo(tenantSchema);
-        int deleted = ragDocumentRepository.deleteBySource(tenantSchema, FactDocumentFactory.SOURCE_OBSERVATION, observationId);
-        log.info("Gözlem dokümanı silindi: id={} → silinen satır={}", observationId, deleted);
+        deleteObservation(tenantSchema, observationId, 0L);
     }
 
-    // ── Ortak ingestion adımı (hash idempotency + embedding) ────────────────
+    public void deleteObservation(String tenantSchema, UUID observationId, long aggregateVersion) {
+        tenantSchemaService.switchTo(tenantSchema);
+        int deleted = ragDocumentRepository.tombstone(
+                tenantSchema, FactDocumentFactory.SOURCE_OBSERVATION, observationId, aggregateVersion);
+        log.info("Gözlem dokümanı tombstone'landı: id={} version={} → etkilenen satır={}",
+                observationId, aggregateVersion, deleted);
+    }
 
-    /**
-     * @return true: yeni indexlendi/reindexlendi; false: içerik değişmedi (hash aynı) → embedding çağrılmadı.
-     */
-    private boolean ingestDoc(FactDocumentFactory.FactDocument doc, String tenantSchema) {
+    // ── Reconciliation (upstream silmeler) ───────────────────────────────────
+
+    /** Sınav silindiğinde türetilen tüm class-analysis dokümanlarını tombstone'lar. */
+    public void deleteExam(String tenantSchema, UUID examId, long aggregateVersion) {
+        tenantSchemaService.switchTo(tenantSchema);
+        int affected = ragDocumentRepository.tombstoneByExam(tenantSchema, examId, aggregateVersion);
+        log.info("Sınav silme reconciliation: examId={} version={} → tombstone={}",
+                examId, aggregateVersion, affected);
+    }
+
+    /** Sınıf silindiğinde o sınıfa ait tüm dokümanları tombstone'lar. */
+    public void deleteClassroom(String tenantSchema, UUID classroomId, long aggregateVersion) {
+        tenantSchemaService.switchTo(tenantSchema);
+        int affected = ragDocumentRepository.tombstoneByClassroom(tenantSchema, classroomId, aggregateVersion);
+        log.info("Sınıf silme reconciliation: classroomId={} version={} → tombstone={}",
+                classroomId, aggregateVersion, affected);
+    }
+
+    // ── Ortak ingestion adımı (atomik version-aware yazım) ──────────────────
+
+    private enum IngestResult { EMBEDDED, SKIPPED, STALE }
+
+    private IngestResult ingestDoc(FactDocumentFactory.FactDocument doc, String tenantSchema, long aggregateVersion) {
+        RagDocumentRepository.DocState state =
+                ragDocumentRepository.findStateBySource(tenantSchema, doc.sourceType(), doc.sourceId());
         String newHash = FactDocumentFactory.sha256Hex(doc.content());
-        String existingHash = ragDocumentRepository.findHashBySource(tenantSchema, doc.sourceType(), doc.sourceId());
 
-        if (newHash.equals(existingHash)) {
-            return false;
+        boolean sameContentAndModel = state != null
+                && !state.deleted()
+                && newHash.equals(state.contentHash())
+                && embeddingModelSig.equals(state.embeddingModel());
+        if (sameContentAndModel) {
+            ragMetrics.hashSkipped();
+            return IngestResult.SKIPPED;
+        }
+        // Eşit/ileri version dışındaki event'ler DB tarafında reddedilecek; yine de
+        // embedding maliyetini önlemek için erken stale kontrolü yapılır. Tombstone
+        // version'u ilerlettiği için silinmiş dokümana gelen bayat event de elenir.
+        if (state != null && aggregateVersion < state.version()) {
+            ragMetrics.staleRejected();
+            return IngestResult.STALE;
         }
 
+        long start = System.nanoTime();
         List<Double> embedding = embeddingModel.embed(doc.content());
-        ragDocumentRepository.upsert(doc, tenantSchema, embedding);
-        return true;
+        ragMetrics.recordEmbedLatency(System.nanoTime() - start);
+
+        // Kaynak fact satırı silinmişse (sınav/sınıf/gözlem) yazım atomik olarak atlanır.
+        ragDocumentRepository.upsertGuarded(doc, tenantSchema, aggregateVersion,
+                embeddingModelSig, embeddingDims, embedding);
+        ragMetrics.embedded();
+        return IngestResult.EMBEDDED;
     }
 
     // ── Tenant şeması fact okuma ────────────────────────────────────────────
 
     private List<Map<String, Object>> jdbcTemplateTrendRows(String tenantSchema, UUID examId, UUID classroomId) {
-        // Not: tablolar doğrulanmış kiracı şema adıyla NİTELİKLİ yazılır
-        // (SET search_path havuz bağlantı yapısında bağlantı değişince etkisini yitirir).
         return jdbcTemplate.queryForList(
                 """
                 SELECT cst.subject_id,
@@ -240,7 +298,7 @@ public class IngestionService {
         if (val == null) return null;
         if (val instanceof LocalDate ld) return ld;
         if (val instanceof Date d) return d.toLocalDate();
-        if (val instanceof java.sql.Timestamp ts) return ts.toLocalDateTime().toLocalDate();
+        if (val instanceof Timestamp ts) return ts.toLocalDateTime().toLocalDate();
         return LocalDate.parse(val.toString());
     }
 

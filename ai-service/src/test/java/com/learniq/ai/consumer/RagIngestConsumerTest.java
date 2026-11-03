@@ -42,7 +42,7 @@ class RagIngestConsumerTest {
 
         consumer.consumeClassAnalysis(message);
 
-        verify(ingestionService).ingestClassAnalysis("akademi_1", examId, classroomId);
+        verify(ingestionService).ingestClassAnalysis("akademi_1", examId, classroomId, 0L);
     }
 
     @Test
@@ -56,7 +56,53 @@ class RagIngestConsumerTest {
 
         consumer.consumeClassAnalysis(event);
 
-        verify(ingestionService).ingestClassAnalysis(eq("akademi_1"), any(), any());
+        verify(ingestionService).ingestClassAnalysis(eq("akademi_1"), any(), any(), eq(0L));
+    }
+
+    @Test
+    @DisplayName("Zarf v2 (payload iç içe) → aggregateVersion ingestion'a iletilir")
+    void consumeClassAnalysis_envelope_passesVersion() {
+        UUID examId = UUID.randomUUID();
+        UUID classroomId = UUID.randomUUID();
+        Map<String, Object> message = new HashMap<>();
+        message.put("eventType", "CLASS_ANALYSIS_COMPLETED");
+        message.put("tenantId", "akademi_1");
+        message.put("aggregateVersion", 42);
+        message.put("payload", Map.of("examId", examId.toString(), "classroomId", classroomId.toString()));
+
+        consumer.consumeClassAnalysis(message);
+
+        verify(ingestionService).ingestClassAnalysis("akademi_1", examId, classroomId, 42L);
+    }
+
+    @Test
+    @DisplayName("Zarf v2 TEACHER_OBSERVATION_DELETED → version'lı tombstone çağrılır")
+    void consumeObservation_envelopeDeleted_passesVersion() {
+        UUID obsId = UUID.randomUUID();
+        Map<String, Object> message = new HashMap<>();
+        message.put("eventType", "TEACHER_OBSERVATION_DELETED");
+        message.put("tenantId", "akademi_1");
+        message.put("aggregateVersion", 7);
+        message.put("payload", Map.of("observationId", obsId.toString()));
+
+        consumer.consumeObservation(message);
+
+        verify(ingestionService).deleteObservation("akademi_1", obsId, 7L);
+    }
+
+    @Test
+    @DisplayName("EXAM_DELETED → sınav dokümanları tombstone'lanır")
+    void consumeClassAnalysis_examDeleted_tombstones() {
+        UUID examId = UUID.randomUUID();
+        Map<String, Object> message = new HashMap<>();
+        message.put("eventType", "EXAM_DELETED");
+        message.put("tenantId", "akademi_1");
+        message.put("aggregateVersion", 100);
+        message.put("payload", Map.of("examId", examId.toString()));
+
+        consumer.consumeClassAnalysis(message);
+
+        verify(ingestionService).deleteExam("akademi_1", examId, 100L);
     }
 
     @Test
@@ -87,10 +133,10 @@ class RagIngestConsumerTest {
     }
 
     @Test
-    @DisplayName("Bozuk JSON → IllegalStateException (retry/DLT akışına düşer)")
+    @DisplayName("Bozuk JSON → IllegalArgumentException (retry edilmeden DLT)")
     void consumeClassAnalysis_badJson_throwsIllegalState() {
         assertThatThrownBy(() -> consumer.consumeClassAnalysis("NOT_JSON"))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(ingestionService);
     }
 
@@ -106,7 +152,7 @@ class RagIngestConsumerTest {
 
         consumer.consumeObservation(message);
 
-        verify(ingestionService).ingestObservation("akademi_1", obsId);
+        verify(ingestionService).ingestObservation("akademi_1", obsId, 0L);
     }
 
     @Test
@@ -122,7 +168,7 @@ class RagIngestConsumerTest {
                 "tenantId", "akademi_1",
                 "observationId", obsId.toString())));
 
-        verify(ingestionService).ingestObservation("akademi_1", obsId);
+        verify(ingestionService).ingestObservation("akademi_1", obsId, 0L);
     }
 
     @Test
@@ -135,7 +181,7 @@ class RagIngestConsumerTest {
 
         consumer.consumeObservation(message);
 
-        verify(ingestionService).deleteObservation("akademi_1", obsId);
+        verify(ingestionService).deleteObservation("akademi_1", obsId, 0L);
     }
 
     @Test

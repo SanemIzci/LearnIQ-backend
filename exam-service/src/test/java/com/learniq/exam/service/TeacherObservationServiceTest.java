@@ -79,7 +79,7 @@ class TeacherObservationServiceTest {
                 .build();
 
         doNothing().when(accessControlService).validateClassroomAccess(any(), any(), any(), any());
-        when(observationRepository.save(any())).thenReturn(saved);
+        when(observationRepository.saveAndFlush(any())).thenReturn(saved);
 
         ObservationResponse response = observationService.create(tenantId, teacherId, role, classroomId, request);
 
@@ -87,8 +87,8 @@ class TeacherObservationServiceTest {
         assertThat(response.getContent()).isEqualTo(request.getContent());
         assertThat(response.getTags()).containsExactly("matematik", "iyileşme");
         verify(accessControlService).validateClassroomAccess(tenantId, teacherId, role, classroomId);
-        verify(observationRepository).save(any(TeacherObservation.class));
-        verify(kafkaTemplate).send(eq(TeacherObservationService.OBSERVATION_TOPIC), any());
+        verify(observationRepository).saveAndFlush(any(TeacherObservation.class));
+        verify(kafkaTemplate).send(eq(TeacherObservationService.OBSERVATION_TOPIC), anyString(), any());
     }
 
     @Test
@@ -105,7 +105,7 @@ class TeacherObservationServiceTest {
                 .build();
 
         doNothing().when(accessControlService).validateClassroomAccess(any(), any(), any(), any());
-        when(observationRepository.save(any())).thenReturn(saved);
+        when(observationRepository.saveAndFlush(any())).thenReturn(saved);
 
         ObservationResponse response = observationService.create(tenantId, teacherId, role, classroomId, request);
 
@@ -185,7 +185,7 @@ class TeacherObservationServiceTest {
         request.setTags(List.of("yeni-etiket"));
 
         when(observationRepository.findByIdAndTeacherId(observationId, teacherId)).thenReturn(Optional.of(existing));
-        when(observationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(observationRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
 
         ObservationResponse response = observationService.update(teacherId, observationId, request);
 
@@ -233,17 +233,24 @@ class TeacherObservationServiceTest {
         request.setContent("Sınıf bu denemede başarı gösterdi, dikkat artıyor.");
 
         doNothing().when(accessControlService).validateClassroomAccess(any(), any(), any(), any());
-        when(observationRepository.save(any())).thenReturn(TeacherObservation.builder()
+        when(observationRepository.saveAndFlush(any())).thenReturn(TeacherObservation.builder()
                 .id(observationId).teacherId(teacherId).classroomId(classroomId).build());
 
         observationService.create(tenantId, teacherId, role, classroomId, request);
 
         org.mockito.ArgumentCaptor<Map<String, Object>> captor =
                 org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(kafkaTemplate).send(eq(TeacherObservationService.OBSERVATION_TOPIC), captor.capture());
-        org.assertj.core.api.Assertions.assertThat(captor.getValue())
+        verify(kafkaTemplate).send(eq(TeacherObservationService.OBSERVATION_TOPIC),
+                eq(observationId.toString()), captor.capture());
+        Map<String, Object> event = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(event)
                 .containsEntry("eventType", "TEACHER_OBSERVATION_CREATED")
                 .containsEntry("tenantId", tenantId)
+                .containsEntry("aggregateId", observationId.toString())
+                .containsEntry("schemaVersion", 2);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) event.get("payload");
+        org.assertj.core.api.Assertions.assertThat(payload)
                 .containsEntry("observationId", observationId.toString())
                 .containsEntry("classroomId", classroomId.toString());
     }
@@ -259,9 +266,15 @@ class TeacherObservationServiceTest {
 
         org.mockito.ArgumentCaptor<Map<String, Object>> captor =
                 org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(kafkaTemplate).send(eq(TeacherObservationService.OBSERVATION_TOPIC), captor.capture());
-        org.assertj.core.api.Assertions.assertThat(captor.getValue())
+        verify(kafkaTemplate).send(eq(TeacherObservationService.OBSERVATION_TOPIC),
+                eq(observationId.toString()), captor.capture());
+        Map<String, Object> event = captor.getValue();
+        org.assertj.core.api.Assertions.assertThat(event)
                 .containsEntry("eventType", "TEACHER_OBSERVATION_DELETED")
+                .containsEntry("aggregateVersion", 1L);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) event.get("payload");
+        org.assertj.core.api.Assertions.assertThat(payload)
                 .containsEntry("observationId", observationId.toString());
     }
 }

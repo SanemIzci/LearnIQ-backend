@@ -9,6 +9,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
@@ -34,6 +35,7 @@ class IngestionServiceTest {
     @Mock private RagDocumentRepository ragDocumentRepository;
     @Mock private EmbeddingModel embeddingModel;
     @Mock private JdbcTemplate jdbcTemplate;
+    @Mock private RagMetrics ragMetrics;
 
     @InjectMocks private IngestionService ingestionService;
 
@@ -47,6 +49,8 @@ class IngestionServiceTest {
         examId = UUID.randomUUID();
         classroomId = UUID.randomUUID();
         subjectId = UUID.randomUUID();
+        ReflectionTestUtils.setField(ingestionService, "embeddingModelSig", "text-embedding-3-small@1536");
+        ReflectionTestUtils.setField(ingestionService, "embeddingDims", 1536);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -85,7 +89,7 @@ class IngestionServiceTest {
     void ingestClassAnalysis_embedsAndUpserts() {
         stubFactReads();
         when(embeddingModel.embed(anyString())).thenReturn(List.of(0.1, 0.2));
-        when(ragDocumentRepository.findHashBySource(anyString(), anyString(), any()))
+        when(ragDocumentRepository.findStateBySource(anyString(), anyString(), any()))
                 .thenReturn(null); // yeni doküman
 
         ingestionService.ingestClassAnalysis(tenant, examId, classroomId);
@@ -95,7 +99,8 @@ class IngestionServiceTest {
 
         ArgumentCaptor<FactDocumentFactory.FactDocument> docCaptor =
                 ArgumentCaptor.forClass(FactDocumentFactory.FactDocument.class);
-        verify(ragDocumentRepository).upsert(docCaptor.capture(), eq(tenant), eq(List.of(0.1, 0.2)));
+        verify(ragDocumentRepository).upsertGuarded(docCaptor.capture(), eq(tenant), eq(0L),
+                eq("text-embedding-3-small@1536"), eq(1536), eq(List.of(0.1, 0.2)));
         assertThat(docCaptor.getValue().content()).contains("12-A").contains("24.6").contains("+1.4");
     }
 
@@ -104,7 +109,7 @@ class IngestionServiceTest {
     void ingestClassAnalysis_schemaQualifiedSql() {
         stubFactReads();
         when(embeddingModel.embed(anyString())).thenReturn(List.of(0.1));
-        when(ragDocumentRepository.findHashBySource(anyString(), anyString(), any())).thenReturn(null);
+        when(ragDocumentRepository.findStateBySource(anyString(), anyString(), any())).thenReturn(null);
 
         ingestionService.ingestClassAnalysis(tenant, examId, classroomId);
 
@@ -120,15 +125,17 @@ class IngestionServiceTest {
     @DisplayName("ingestClassAnalysis - üretilecek içerik hash'i depodakine eşitse embedding çağrılmaz")
     void ingestClassAnalysis_sameHash_skipsEmbedding() {
         stubFactReads();
-        when(ragDocumentRepository.findHashBySource(anyString(), anyString(), any())).thenAnswer(inv ->
+        when(ragDocumentRepository.findStateBySource(anyString(), anyString(), any())).thenAnswer(inv ->
                 // gerçek akışla birebir: aynı factory üretimi deterministic olduğu için
                 // servisin üreteceği içerikten hash üretmek geçerli stub'dır
-                FactDocumentFactory.sha256Hex(expectedAnalysisContent()));
+                new RagDocumentRepository.DocState(
+                        FactDocumentFactory.sha256Hex(expectedAnalysisContent()),
+                        0L, false, "text-embedding-3-small@1536"));
 
         ingestionService.ingestClassAnalysis(tenant, examId, classroomId);
 
         verify(embeddingModel, never()).embed(anyString());
-        verify(ragDocumentRepository, never()).upsert(any(), anyString(), any());
+        verify(ragDocumentRepository, never()).upsertGuarded(any(), anyString(), anyLong(), anyString(), anyInt(), any());
     }
 
     @Test
@@ -140,7 +147,7 @@ class IngestionServiceTest {
         ingestionService.ingestClassAnalysis(tenant, examId, classroomId);
 
         verify(embeddingModel, never()).embed(anyString());
-        verify(ragDocumentRepository, never()).upsert(any(), anyString(), any());
+        verify(ragDocumentRepository, never()).upsertGuarded(any(), anyString(), anyLong(), anyString(), anyInt(), any());
     }
 
     // ── observation ingestion ────────────────────────────────────────────────
@@ -162,25 +169,28 @@ class IngestionServiceTest {
         UUID observationId = UUID.randomUUID();
         doReturn(obsRow).when(jdbcTemplate).queryForMap(contains(tenant + ".teacher_observations"), eq(observationId));
         when(embeddingModel.embed(anyString())).thenReturn(List.of(0.5, 0.6));
-        when(ragDocumentRepository.findHashBySource(anyString(), anyString(), any())).thenReturn(null);
+        when(ragDocumentRepository.findStateBySource(anyString(), anyString(), any())).thenReturn(null);
 
         ingestionService.ingestObservation(tenant, observationId);
 
         verify(embeddingModel).embed(contains("Türev konusunda"));
         verify(ragDocumentRepository)
-                .upsert(any(FactDocumentFactory.FactDocument.class), eq(tenant), eq(List.of(0.5, 0.6)));
+                .upsertGuarded(any(FactDocumentFactory.FactDocument.class), eq(tenant), eq(0L),
+                        eq("text-embedding-3-small@1536"), eq(1536), eq(List.of(0.5, 0.6)));
     }
 
     @Test
-    @DisplayName("deleteObservation - vektör deposu kaydı temizlenir")
+    @DisplayName("deleteObservation - doküman tombstone'lanır (fiziksel silme yok)")
     void deleteObservation_removesDoc() {
-        when(ragDocumentRepository.deleteBySource(eq(tenant), eq(FactDocumentFactory.SOURCE_OBSERVATION), any()))
-                .thenReturn(1);
+        UUID observationId = UUID.randomUUID();
+        when(ragDocumentRepository.tombstone(eq(tenant), eq(FactDocumentFactory.SOURCE_OBSERVATION),
+                eq(observationId), eq(0L))).thenReturn(1);
 
-        ingestionService.deleteObservation(tenant, UUID.randomUUID());
+        ingestionService.deleteObservation(tenant, observationId);
 
         verify(tenantSchemaService).switchTo(tenant);
-        verify(ragDocumentRepository).deleteBySource(eq(tenant), eq(FactDocumentFactory.SOURCE_OBSERVATION), any());
+        verify(ragDocumentRepository).tombstone(eq(tenant), eq(FactDocumentFactory.SOURCE_OBSERVATION),
+                eq(observationId), eq(0L));
     }
 
     /**

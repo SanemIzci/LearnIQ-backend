@@ -25,4 +25,22 @@ public final class KafkaAfterCommit {
             kafkaTemplate.send(topic, payload);
         }
     }
+
+    /**
+     * Partition key ile gönderir. Aynı aggregate'e ait eventlerin sıralı işlenmesi için
+     * key = aggregateId kullanılmalıdır.
+     */
+    public static void send(KafkaTemplate<String, Object> kafkaTemplate, String topic,
+                            String key, Object payload) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    kafkaTemplate.send(topic, key, payload);
+                }
+            });
+        } else {
+            kafkaTemplate.send(topic, key, payload);
+        }
+    }
 }

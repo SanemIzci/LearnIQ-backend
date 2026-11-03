@@ -60,4 +60,12 @@ public class TeacherObservation {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    /**
+     * Aggregate version — RAG event sıralaması için monotonik artar.
+     * Hibernate optimistic locking ile update sırasında otomatik artırılır.
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
 }

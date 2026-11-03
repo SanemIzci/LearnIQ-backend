@@ -59,8 +59,9 @@ public class TeacherObservationService {
                 .tags(serializeTags(request.getTags()))
                 .build();
 
-        TeacherObservation saved = observationRepository.save(observation);
-        publishObservationEvent(tenantId, "TEACHER_OBSERVATION_CREATED", saved.getId(), classroomId);
+        TeacherObservation saved = observationRepository.saveAndFlush(observation);
+        publishObservationEvent(tenantId, "TEACHER_OBSERVATION_CREATED", saved.getId(), classroomId,
+                saved.getVersion() == null ? 0L : saved.getVersion());
         log.info("Gözlem notu oluşturuldu: id={} teacher={} classroom={}", saved.getId(), teacherId, classroomId);
         return toResponse(saved);
     }
@@ -119,9 +120,10 @@ public class TeacherObservationService {
             observation.setTags(serializeTags(request.getTags()));
         }
 
-        TeacherObservation saved = observationRepository.save(observation);
+        TeacherObservation saved = observationRepository.saveAndFlush(observation);
         String tenantSchema = com.learniq.common.tenant.TenantContext.getCurrentTenant();
-        publishObservationEvent(tenantSchema, "TEACHER_OBSERVATION_UPDATED", observationId, saved.getClassroomId());
+        publishObservationEvent(tenantSchema, "TEACHER_OBSERVATION_UPDATED", observationId, saved.getClassroomId(),
+                saved.getVersion() == null ? 0L : saved.getVersion());
         log.info("Gözlem notu güncellendi: id={}", observationId);
         return toResponse(saved);
     }
@@ -132,25 +134,32 @@ public class TeacherObservationService {
     public void delete(UUID teacherId, UUID observationId) {
         TeacherObservation observation = findOwnedOrThrow(teacherId, observationId);
         String tenantSchema = com.learniq.common.tenant.TenantContext.getCurrentTenant();
+        long nextVersion = (observation.getVersion() == null ? 0L : observation.getVersion()) + 1L;
         observationRepository.delete(observation);
-        publishObservationEvent(tenantSchema, "TEACHER_OBSERVATION_DELETED", observationId, observation.getClassroomId());
+        publishObservationEvent(tenantSchema, "TEACHER_OBSERVATION_DELETED", observationId, observation.getClassroomId(),
+                nextVersion);
         log.info("Gözlem notu silindi: id={}", observationId);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private void publishObservationEvent(String tenantSchema, String eventType, UUID observationId, UUID classroomId) {
-        Map<String, Object> event = new HashMap<>();
-        event.put("eventType", eventType);
-        event.put("tenantId", tenantSchema);
-        event.put("observationId", observationId.toString());
-        if (classroomId != null) {
-            event.put("classroomId", classroomId.toString());
-        }
+    private void publishObservationEvent(String tenantSchema, String eventType, UUID observationId,
+                                         UUID classroomId, long aggregateVersion) {
         // regex doğrulama(validasyon) yayından önce: kötü şema adı ile event üretme
         com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantSchema);
-        KafkaAfterCommit.send(kafkaTemplate, OBSERVATION_TOPIC, event);
-        log.info("Gözlem olayı kuyruğa alındı: {} id={}", eventType, observationId);
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("observationId", observationId.toString());
+        if (classroomId != null) {
+            payload.put("classroomId", classroomId.toString());
+        }
+
+        Map<String, Object> event = com.learniq.common.messaging.RagEvent.envelope(
+                eventType, tenantSchema, observationId.toString(), aggregateVersion, payload);
+
+        // Partition key = aggregateId → aynı gözlemin eventleri sıralı işlenir.
+        KafkaAfterCommit.send(kafkaTemplate, OBSERVATION_TOPIC, observationId.toString(), event);
+        log.info("Gözlem olayı kuyruğa alındı: {} id={} version={}", eventType, observationId, aggregateVersion);
     }
 
     private TeacherObservation findOwnedOrThrow(UUID teacherId, UUID observationId) {

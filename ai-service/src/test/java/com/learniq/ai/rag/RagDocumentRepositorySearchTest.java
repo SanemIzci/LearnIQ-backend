@@ -44,7 +44,7 @@ class RagDocumentRepositorySearchTest {
         List<Double> embedding = List.of(0.1, 0.2);
 
         List<RagDocumentRepository.RagHit> hits =
-                repo().search(TENANT, embedding, null, null, 5);
+                repo().search(TENANT, embedding, null, null, 5, List.of());
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> argsCaptor = ArgumentCaptor.forClass(Object[].class);
@@ -54,6 +54,8 @@ class RagDocumentRepositorySearchTest {
         assertThat(sqlCaptor.getValue()).contains("1 - (embedding <=> ?::vector)");
         assertThat(sqlCaptor.getValue()).doesNotContain("classroom_id = ?");
         assertThat(sqlCaptor.getValue()).doesNotContain("subject_id = ?");
+        assertThat(sqlCaptor.getValue()).contains("deleted_at IS NULL");
+        assertThat(sqlCaptor.getValue()).doesNotContain("embedding_model IN");
 
         Object[] args = argsCaptor.getValue();
         assertThat(args).hasSize(2);
@@ -64,6 +66,7 @@ class RagDocumentRepositorySearchTest {
         RagDocumentRepository.RagHit hit = hits.get(0);
         assertThat(hit.sourceType()).isEqualTo("TEACHER_OBSERVATION");
         assertThat(hit.metadata()).containsEntry("classroomName", "12-A");
+        assertThat(hit.embeddingModel()).isNull();
         assertThat(hit.similarity()).isEqualTo(0.83,
                 org.assertj.core.data.Offset.offset(1e-6));
     }
@@ -73,7 +76,7 @@ class RagDocumentRepositorySearchTest {
     void search_withPrefilter() {
         List<Double> embedding = List.of(0.1);
 
-        repo().search(TENANT, embedding, UUID.randomUUID(), UUID.randomUUID(), 3);
+        repo().search(TENANT, embedding, UUID.randomUUID(), UUID.randomUUID(), 3, List.of());
 
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> argsCaptor = ArgumentCaptor.forClass(Object[].class);
@@ -103,10 +106,25 @@ class RagDocumentRepositorySearchTest {
                 any(), any());
 
         List<RagDocumentRepository.RagHit> hits =
-                repo().search(TENANT, List.of(0.1), null, null, 5);
+                repo().search(TENANT, List.of(0.1), null, null, 5, List.of());
 
         assertThat(hits).hasSize(1);
         assertThat(hits.get(0).metadata()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("search - allowedModels verilirse embedding_model IN (...) filtresi eklenir")
+    void search_withAllowedModels_addsModelFilter() {
+        repo().search(TENANT, List.of(0.1), null, null, 5, List.of("m1@1536", "m2@768"));
+
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> argsCaptor = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).query(sqlCaptor.capture(), any(RowCallbackHandler.class), argsCaptor.capture());
+
+        assertThat(sqlCaptor.getValue())
+                .contains("AND embedding_model IN (?,?)");
+        assertThat(argsCaptor.getValue())
+                .containsExactly("[0.100000]", "m1@1536", "m2@768", 5);
     }
 
     private void stubRowCallback() throws Exception {

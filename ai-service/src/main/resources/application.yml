@@ -40,12 +40,29 @@ spring:
         options:
           model: text-embedding-3-small
 
-# ── Faz 5: Admin RAG chat tuning ────────────────────────────────────────────
+# ── RAG: embedding provider (chat'ten bağımsız) ─────────────────────────────
+# Chat OpenRouter üzerinden çalışır; embedding ayrı sağlayıcıya yönlenir.
 rag:
+  embedding:
+    base-url: ${RAG_EMBEDDING_BASE_URL:https://api.openai.com}
+    api-key: ${RAG_EMBEDDING_API_KEY:${OPENAI_API_KEY:}}
+    model: ${RAG_EMBEDDING_MODEL:text-embedding-3-small}
+    dimensions: ${RAG_EMBEDDING_DIMENSIONS:1536}
+    model-sig: ${RAG_EMBEDDING_MODEL_SIG:text-embedding-3-small@1536}
+  backfill:
+    batch-size: ${RAG_BACKFILL_BATCH_SIZE:50}
   chat:
     top-k: 5
     similarity-threshold: 0.30
     at-risk-default-net-threshold: 15.0
+    # Boş = model filtresi yok (geçiş uyumluluğu). Model geçişinde imza listesi verilir.
+    allowed-model-sigs: ${RAG_ALLOWED_MODEL_SIGS:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
 
 aws:
   s3:
