@@ -1,6 +1,8 @@
 package com.learniq.exam.service;
 
 import com.learniq.exam.dto.*;
+import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import com.learniq.exam.exception.EntityNotFoundException;
 import com.learniq.exam.security.AccessControlService;
 import lombok.RequiredArgsConstructor;
@@ -24,8 +26,8 @@ public class TeacherAnalyticsService {
     private final JdbcTemplate jdbcTemplate;
     private final AccessControlService accessControlService;
 
-    private void setSchema(String tenantId) {
-        jdbcTemplate.execute("SET search_path TO " + com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId));
+    private String schema() {
+        return TenantSchemaValidator.requireValid(TenantContext.getCurrentTenant());
     }
 
     /**
@@ -41,12 +43,12 @@ public class TeacherAnalyticsService {
             UUID examId) {
 
         accessControlService.validateClassroomAccess(tenantId, requesterId, role, classroomId);
-        setSchema(tenantId);
+        String schema = schema();
 
         String classroomName;
         try {
             classroomName = jdbcTemplate.queryForObject(
-                    "SELECT name FROM classrooms WHERE id = ?",
+                    "SELECT name FROM %s.classrooms WHERE id = ?".formatted(schema),
                     String.class,
                     classroomId);
         } catch (EmptyResultDataAccessException e) {
@@ -54,7 +56,7 @@ public class TeacherAnalyticsService {
         }
 
         Integer totalStudents = jdbcTemplate.queryForObject(
-                "SELECT count(*) FROM classroom_students WHERE classroom_id = ?",
+                "SELECT count(*) FROM %s.classroom_students WHERE classroom_id = ?".formatted(schema),
                 Integer.class,
                 classroomId);
         int totalStudentCount = totalStudents != null ? totalStudents : 0;
@@ -64,7 +66,8 @@ public class TeacherAnalyticsService {
         if (examId != null) {
             try {
                 examSummary = jdbcTemplate.queryForObject(
-                        "SELECT id, title, exam_date, exam_type FROM exams WHERE id = ?",
+                        "SELECT id, title, exam_date, exam_type FROM %s.exams WHERE id = ?"
+                                .formatted(schema),
                         (rs, rowNum) -> ExamSummaryDto.builder()
                                 .id(UUID.fromString(rs.getString("id")))
                                 .title(rs.getString("title"))
@@ -79,16 +82,16 @@ public class TeacherAnalyticsService {
             List<ExamSummaryDto> latestExams = jdbcTemplate.query(
                     """
                     SELECT e.id, e.title, e.exam_date, e.exam_type
-                    FROM exams e
+                    FROM %1$s.exams e
                     WHERE e.id IN (
                         SELECT DISTINCT ser.exam_id
-                        FROM student_exam_results ser
-                        JOIN classroom_students cs ON cs.student_id = ser.student_id
+                        FROM %1$s.student_exam_results ser
+                        JOIN %1$s.classroom_students cs ON cs.student_id = ser.student_id
                         WHERE cs.classroom_id = ? AND ser.status = 'APPROVED'
                     )
                     ORDER BY e.exam_date DESC, e.created_at DESC
                     LIMIT 1
-                    """,
+                    """.formatted(schema),
                     (rs, rowNum) -> ExamSummaryDto.builder()
                             .id(UUID.fromString(rs.getString("id")))
                             .title(rs.getString("title"))
@@ -107,14 +110,14 @@ public class TeacherAnalyticsService {
         List<ClassExamTrendDto> recentTrends = jdbcTemplate.query(
                 """
                 SELECT e.id, e.title, e.exam_date, AVG(ser.total_score) as avg_score, count(ser.id) as part_count
-                FROM exams e
-                JOIN student_exam_results ser ON ser.exam_id = e.id
-                JOIN classroom_students cs ON cs.student_id = ser.student_id
+                FROM %1$s.exams e
+                JOIN %1$s.student_exam_results ser ON ser.exam_id = e.id
+                JOIN %1$s.classroom_students cs ON cs.student_id = ser.student_id
                 WHERE cs.classroom_id = ? AND ser.status = 'APPROVED'
                 GROUP BY e.id, e.title, e.exam_date, e.created_at
                 ORDER BY e.exam_date DESC, e.created_at DESC
                 LIMIT 5
-                """,
+                """.formatted(schema),
                 (rs, rowNum) -> ClassExamTrendDto.builder()
                         .examId(UUID.fromString(rs.getString("id")))
                         .examTitle(rs.getString("title"))
@@ -142,10 +145,10 @@ public class TeacherAnalyticsService {
         Map<String, Object> examStats = jdbcTemplate.queryForMap(
                 """
                 SELECT count(ser.id) as part_count, AVG(ser.total_score) as avg_score
-                FROM student_exam_results ser
-                JOIN classroom_students cs ON cs.student_id = ser.student_id
+                FROM %1$s.student_exam_results ser
+                JOIN %1$s.classroom_students cs ON cs.student_id = ser.student_id
                 WHERE cs.classroom_id = ? AND ser.exam_id = ? AND ser.status = 'APPROVED'
-                """,
+                """.formatted(schema),
                 classroomId, examId);
 
         Number partCountNum = (Number) examStats.get("part_count");
@@ -167,14 +170,14 @@ public class TeacherAnalyticsService {
                        AVG(ssr.correct_count) as avg_correct,
                        AVG(ssr.wrong_count) as avg_wrong,
                        AVG(ssr.net_score) as avg_net
-                FROM student_subject_results ssr
-                JOIN subjects s ON s.id = ssr.subject_id
-                JOIN classroom_students cs ON cs.student_id = ssr.student_id
-                JOIN student_exam_results ser ON ser.student_id = ssr.student_id AND ser.exam_id = ssr.exam_id
+                FROM %1$s.student_subject_results ssr
+                JOIN %1$s.subjects s ON s.id = ssr.subject_id
+                JOIN %1$s.classroom_students cs ON cs.student_id = ssr.student_id
+                JOIN %1$s.student_exam_results ser ON ser.student_id = ssr.student_id AND ser.exam_id = ssr.exam_id
                 WHERE cs.classroom_id = ? AND ssr.exam_id = ? AND ser.status = 'APPROVED'
                 GROUP BY s.id, s.name
                 ORDER BY s.name
-                """,
+                """.formatted(schema),
                 (rs, rowNum) -> ClassSubjectAverageDto.builder()
                         .subjectId(UUID.fromString(rs.getString("subject_id")))
                         .subjectName(rs.getString("subject_name"))
@@ -218,14 +221,15 @@ public class TeacherAnalyticsService {
             accessControlService.validateClassroomAccess(tenantId, requesterId, role, cid);
         }
 
-        setSchema(tenantId);
+        String schema = schema();
 
         // Find exam if not specified
         ExamSummaryDto examSummary;
         if (examId != null) {
             try {
                 examSummary = jdbcTemplate.queryForObject(
-                        "SELECT id, title, exam_date, exam_type FROM exams WHERE id = ?",
+                        "SELECT id, title, exam_date, exam_type FROM %s.exams WHERE id = ?"
+                                .formatted(schema),
                         (rs, rowNum) -> ExamSummaryDto.builder()
                                 .id(UUID.fromString(rs.getString("id")))
                                 .title(rs.getString("title"))
@@ -239,18 +243,18 @@ public class TeacherAnalyticsService {
         } else {
             String inSql = String.join(",", Collections.nCopies(classroomIds.size(), "?"));
             List<ExamSummaryDto> candidateExams = jdbcTemplate.query(
-                    String.format("""
+                    """
                     SELECT e.id, e.title, e.exam_date, e.exam_type
-                    FROM exams e
+                    FROM %1$s.exams e
                     WHERE e.id IN (
                         SELECT DISTINCT ser.exam_id
-                        FROM student_exam_results ser
-                        JOIN classroom_students cs ON cs.student_id = ser.student_id
-                        WHERE cs.classroom_id IN (%s) AND ser.status = 'APPROVED'
+                        FROM %1$s.student_exam_results ser
+                        JOIN %1$s.classroom_students cs ON cs.student_id = ser.student_id
+                        WHERE cs.classroom_id IN (%2$s) AND ser.status = 'APPROVED'
                     )
                     ORDER BY e.exam_date DESC, e.created_at DESC
                     LIMIT 1
-                    """, inSql),
+                    """.formatted(schema, inSql),
                     (rs, rowNum) -> ExamSummaryDto.builder()
                             .id(UUID.fromString(rs.getString("id")))
                             .title(rs.getString("title"))
@@ -270,12 +274,12 @@ public class TeacherAnalyticsService {
 
         for (UUID cid : classroomIds) {
             String classroomName = jdbcTemplate.queryForObject(
-                    "SELECT name FROM classrooms WHERE id = ?",
+                    "SELECT name FROM %s.classrooms WHERE id = ?".formatted(schema),
                     String.class,
                     cid);
 
             Integer totalStudents = jdbcTemplate.queryForObject(
-                    "SELECT count(*) FROM classroom_students WHERE classroom_id = ?",
+                    "SELECT count(*) FROM %s.classroom_students WHERE classroom_id = ?".formatted(schema),
                     Integer.class,
                     cid);
 

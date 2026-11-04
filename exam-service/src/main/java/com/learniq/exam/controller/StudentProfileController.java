@@ -1,5 +1,7 @@
 package com.learniq.exam.controller;
 
+import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,12 +28,13 @@ public class StudentProfileController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
+        String schema = TenantSchemaValidator.requireValid(TenantContext.getCurrentTenant());
         String sql = """
-            UPDATE users 
+            UPDATE %s.users 
             SET leaderboard_consent = :consent, 
                 leaderboard_consent_at = CURRENT_TIMESTAMP
             WHERE id = :id
-        """;
+            """.formatted(schema);
         
         int rows = jdbcTemplate.update(sql, Map.of(
             "consent", consent,

@@ -2,6 +2,8 @@ package com.learniq.exam.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import com.learniq.exam.dto.StudentDashboardResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +15,8 @@ import java.security.SecureRandom;
 import java.sql.Types;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -31,9 +35,12 @@ public class ShareLinkService {
         StudentDashboardResponse dashboard = studentDashboardService.getDashboard(examId, studentId);
 
         // 2. Güvenli Token üret (32 byte -> Base64Url encoded = 43 chars)
+        //    Token'a tenant şeması öneklenir: public endpoint'te header olmadığından
+        //    satırın hangi tenant şemasında aranacağı token üzerinden çözülür.
+        String schema = TenantSchemaValidator.requireValid(TenantContext.getCurrentTenant());
         byte[] tokenBytes = new byte[32];
         secureRandom.nextBytes(tokenBytes);
-        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
+        String token = schema + "." + Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
 
         // 3. JSONB formatına çevir
         String snapshotJson;
@@ -46,9 +53,9 @@ public class ShareLinkService {
 
         // 4. Veritabanına kaydet (Geçerlilik süresi: 30 gün)
         String sql = """
-            INSERT INTO shared_links (token, student_id, snapshot, created_at, expires_at)
+            INSERT INTO %s.shared_links (token, student_id, snapshot, created_at, expires_at)
             VALUES (:token, :studentId, CAST(:snapshot AS JSONB), :createdAt, :expiresAt)
-        """;
+            """.formatted(schema);
 
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("token", token)
@@ -63,11 +70,25 @@ public class ShareLinkService {
     }
 
     public StudentDashboardResponse getSharedSnapshot(String token) {
+        int dot = token.indexOf('.');
+        if (dot <= 0 || dot == token.length() - 1) {
+            throw new IllegalArgumentException("Geçersiz paylaşım linki.");
+        }
+        String schema = TenantSchemaValidator.requireValid(token.substring(0, dot));
+
+        // Var olmayan kiracı şeması → BadSqlGrammar/500 yerine 400 döner.
+        List<Map<String, Object>> schemaExists = jdbcTemplate.queryForList(
+                "SELECT 1 FROM information_schema.schemata WHERE schema_name = :schema",
+                new MapSqlParameterSource("schema", schema));
+        if (schemaExists.isEmpty()) {
+            throw new IllegalArgumentException("Geçersiz veya süresi dolmuş paylaşım linki.");
+        }
+
         String sql = """
             SELECT snapshot, expires_at, revoked_at 
-            FROM shared_links 
+            FROM %s.shared_links 
             WHERE token = :token
-        """;
+            """.formatted(schema);
 
         return jdbcTemplate.query(sql, new MapSqlParameterSource("token", token), rs -> {
             if (!rs.next()) {

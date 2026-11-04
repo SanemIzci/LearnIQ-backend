@@ -35,17 +35,17 @@ public class ClassSubjectTrendCalculator {
 
     @Transactional
     public void calculate(String tenantId, UUID examId) {
-        setSchema(tenantId);
+        String schema = com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId);
         log.info("Trend hesaplama başladı: tenantId={}, examId={}", tenantId, examId);
 
         // 1. Sınava katılan öğrencilerin bulunduğu sınıfları bul
         List<UUID> classroomIds = jdbcTemplate.queryForList(
                 """
                 SELECT DISTINCT cs.classroom_id
-                FROM classroom_students cs
-                JOIN student_exam_results ser ON ser.student_id = cs.student_id
+                FROM %1$s.classroom_students cs
+                JOIN %1$s.student_exam_results ser ON ser.student_id = cs.student_id
                 WHERE ser.exam_id = ? AND ser.status = 'APPROVED'
-                """,
+                """.formatted(schema),
                 UUID.class, examId);
 
         if (classroomIds.isEmpty()) {
@@ -56,7 +56,7 @@ public class ClassSubjectTrendCalculator {
         // 2. Her sınıf için ders bazlı istatistikleri hesapla (aggregate version üret)
         Map<UUID, Long> calcVersions = new LinkedHashMap<>();
         for (UUID classroomId : classroomIds) {
-            calcVersions.put(classroomId, calculateForClassroom(tenantId, examId, classroomId));
+            calcVersions.put(classroomId, calculateForClassroom(schema, examId, classroomId));
         }
 
         // 3. CLASS_ANALYSIS_COMPLETED event yayımla (her sınıf için, aynı aggregateVersion)
@@ -71,11 +71,11 @@ public class ClassSubjectTrendCalculator {
      * @return bu (classroom, exam) aggregate'i için monotonik hesaplama version'u.
      *         Aynı hesaplama TX'inde yazılan tüm fact satırları bu version'u paylaşır.
      */
-    private long calculateForClassroom(String tenantId, UUID examId, UUID classroomId) {
-        long calcVersion = nextCalcVersion(classroomId, examId);
+    private long calculateForClassroom(String schema, UUID examId, UUID classroomId) {
+        long calcVersion = nextCalcVersion(schema, classroomId, examId);
         // Sınıftaki toplam kayıtlı öğrenci sayısı (expected_student_count)
         Integer expectedCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM classroom_students WHERE classroom_id = ?",
+                "SELECT COUNT(*) FROM %s.classroom_students WHERE classroom_id = ?".formatted(schema),
                 Integer.class, classroomId);
         int expectedStudentCount = expectedCount != null ? expectedCount : 0;
 
@@ -86,15 +86,15 @@ public class ClassSubjectTrendCalculator {
                        AVG(ssr.net_score)    AS avg_net,
                        AVG(ser.total_score)  AS avg_score,
                        COUNT(DISTINCT ssr.student_id) AS student_count
-                FROM student_subject_results ssr
-                JOIN student_exam_results ser
+                FROM %1$s.student_subject_results ssr
+                JOIN %1$s.student_exam_results ser
                   ON ser.student_id = ssr.student_id AND ser.exam_id = ssr.exam_id
-                JOIN classroom_students cs ON cs.student_id = ssr.student_id
+                JOIN %1$s.classroom_students cs ON cs.student_id = ssr.student_id
                 WHERE ssr.exam_id = ?
                   AND cs.classroom_id = ?
                   AND ser.status = 'APPROVED'
                 GROUP BY ssr.subject_id
-                """,
+                """.formatted(schema),
                 examId, classroomId);
 
         for (Map<String, Object> row : subjectStats) {
@@ -109,22 +109,23 @@ public class ClassSubjectTrendCalculator {
                     : BigDecimal.ZERO;
 
             // Bir önceki sınavın avg_net'i
-            BigDecimal previousAvgNet = getPreviousAvgNet(classroomId, subjectId, examId);
+            BigDecimal previousAvgNet = getPreviousAvgNet(schema, classroomId, subjectId, examId);
             BigDecimal delta = previousAvgNet != null
                     ? avgNet.subtract(previousAvgNet).setScale(2, RoundingMode.HALF_UP)
                     : null;
 
             String trendDirection = computeTrend(delta);
 
-            upsertTrend(examId, classroomId, subjectId, avgNet, avgScore, studentCount,
+            upsertTrend(schema, examId, classroomId, subjectId, avgNet, avgScore, studentCount,
                     expectedStudentCount, participationRate, delta, trendDirection, calcVersion);
         }
         return calcVersion;
     }
 
-    private long nextCalcVersion(UUID classroomId, UUID examId) {
+    private long nextCalcVersion(String schema, UUID classroomId, UUID examId) {
         Long current = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(MAX(calc_version), 0) FROM class_subject_trends WHERE classroom_id = ? AND exam_id = ?",
+                "SELECT COALESCE(MAX(calc_version), 0) FROM %s.class_subject_trends WHERE classroom_id = ? AND exam_id = ?"
+                        .formatted(schema),
                 Long.class, classroomId, examId);
         return (current == null ? 0L : current) + 1L;
     }
@@ -133,31 +134,31 @@ public class ClassSubjectTrendCalculator {
      * Aynı (classroom, subject) çifti için, exam_date bakımından mevcut sınavdan önceki
      * en son sınavın avg_net değerini döndürür.
      */
-    private BigDecimal getPreviousAvgNet(UUID classroomId, UUID subjectId, UUID currentExamId) {
+    private BigDecimal getPreviousAvgNet(String schema, UUID classroomId, UUID subjectId, UUID currentExamId) {
         List<BigDecimal> result = jdbcTemplate.queryForList(
                 """
                 SELECT cst.avg_net
-                FROM class_subject_trends cst
-                JOIN exams e ON e.id = cst.exam_id
+                FROM %1$s.class_subject_trends cst
+                JOIN %1$s.exams e ON e.id = cst.exam_id
                 WHERE cst.classroom_id = ?
                   AND cst.subject_id   = ?
                   AND cst.exam_id      != ?
-                  AND e.exam_date < (SELECT exam_date FROM exams WHERE id = ?)
+                  AND e.exam_date < (SELECT exam_date FROM %1$s.exams WHERE id = ?)
                 ORDER BY e.exam_date DESC, e.created_at DESC
                 LIMIT 1
-                """,
+                """.formatted(schema),
                 BigDecimal.class, classroomId, subjectId, currentExamId, currentExamId);
 
         return result.isEmpty() ? null : result.get(0);
     }
 
-    private void upsertTrend(UUID examId, UUID classroomId, UUID subjectId,
+    private void upsertTrend(String schema, UUID examId, UUID classroomId, UUID subjectId,
                               BigDecimal avgNet, BigDecimal avgScore, int studentCount,
                               int expectedStudentCount, BigDecimal participationRate,
                               BigDecimal delta, String trendDirection, long calcVersion) {
         jdbcTemplate.update(
                 """
-                INSERT INTO class_subject_trends
+                INSERT INTO %s.class_subject_trends
                     (classroom_id, subject_id, exam_id,
                      avg_net, avg_score, student_count,
                      expected_student_count, participation_rate,
@@ -173,7 +174,7 @@ public class ClassSubjectTrendCalculator {
                     trend_direction       = EXCLUDED.trend_direction,
                     calc_version          = EXCLUDED.calc_version,
                     calculated_at         = NOW()
-                """,
+                """.formatted(schema),
                 classroomId, subjectId, examId,
                 avgNet, avgScore, studentCount,
                 expectedStudentCount, participationRate,
@@ -207,10 +208,6 @@ public class ClassSubjectTrendCalculator {
 
     private String aggregateId(UUID classroomId, UUID examId) {
         return classroomId + ":" + examId;
-    }
-
-    private void setSchema(String tenantId) {
-        jdbcTemplate.execute("SET search_path TO " + com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId));
     }
 
     // ── Type-safe helpers ────────────────────────────────────────────────────

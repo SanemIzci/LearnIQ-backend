@@ -42,10 +42,6 @@ class ClassSubjectTrendCalculatorTest {
 
     // ── Helper: classroom var, subject stats setup ─────────────────────────
 
-    private void stubSchemaSet() {
-        doNothing().when(jdbcTemplate).execute(anyString());
-    }
-
     /** classroomIds sorgusu: queryForList(String, Class, Object...) — 1 vararg (examId) */
     @SuppressWarnings("unchecked")
     private void stubClassroomIds(List<UUID> ids) {
@@ -99,7 +95,6 @@ class ClassSubjectTrendCalculatorTest {
     @Test
     @DisplayName("calculate - onaylı sonuç yoksa hiçbir şey yapmaz")
     void calculate_noApprovedResults_skips() {
-        stubSchemaSet();
         stubClassroomIds(Collections.emptyList());
 
         calculator.calculate(tenantId, examId);
@@ -110,7 +105,6 @@ class ClassSubjectTrendCalculatorTest {
     @Test
     @DisplayName("calculate - sınıf bulunan durumda upsert çağrılır")
     void calculate_withClassroom_upsertCalled() {
-        stubSchemaSet();
         stubClassroomIds(List.of(classroomId));
         stubExpectedCount(30);
         stubCalcVersion(1L);
@@ -137,7 +131,6 @@ class ClassSubjectTrendCalculatorTest {
     @Test
     @DisplayName("calculate - delta pozitif ise trend UP olarak upsert edilir")
     void trendDirection_up() {
-        stubSchemaSet();
         stubClassroomIds(List.of(classroomId));
         stubExpectedCount(25);
         stubCalcVersion(1L);
@@ -164,7 +157,6 @@ class ClassSubjectTrendCalculatorTest {
     @Test
     @DisplayName("calculate - delta negatif ise trend DOWN olarak upsert edilir")
     void trendDirection_down() {
-        stubSchemaSet();
         stubClassroomIds(List.of(classroomId));
         stubExpectedCount(25);
         stubCalcVersion(1L);
@@ -190,7 +182,6 @@ class ClassSubjectTrendCalculatorTest {
     @Test
     @DisplayName("calculate - delta yoksa (ilk sınav) trend STABLE olarak upsert edilir")
     void trendDirection_stable_firstExam() {
-        stubSchemaSet();
         stubClassroomIds(List.of(classroomId));
         stubExpectedCount(20);
         stubCalcVersion(1L);

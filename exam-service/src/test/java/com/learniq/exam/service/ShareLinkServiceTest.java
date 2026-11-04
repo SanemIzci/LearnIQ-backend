@@ -18,16 +18,20 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -54,6 +58,8 @@ class ShareLinkServiceTest {
             ResultSetExtractor<StudentDashboardResponse> extractor = invocation.getArgument(2);
             return extractor.extractData(rs);
         }).when(jdbcTemplate).query(anyString(), any(SqlParameterSource.class), any(ResultSetExtractor.class));
+        doReturn(List.of(Map.of("1", 1))).when(jdbcTemplate)
+                .queryForList(anyString(), any(SqlParameterSource.class));
     }
 
     @Test
@@ -73,7 +79,8 @@ class ShareLinkServiceTest {
         String token = shareLinkService.generateShareLink(examId, studentId);
 
         assertNotNull(token);
-        assertEquals(43, token.length());
+        assertTrue(token.indexOf('.') > 0, "token tenant şeması öneki taşımalı");
+        assertEquals(43, token.substring(token.indexOf('.') + 1).length());
         verify(jdbcTemplate).update(anyString(), any(SqlParameterSource.class));
     }
 
@@ -122,6 +129,24 @@ class ShareLinkServiceTest {
     }
 
     @Test
+    @DisplayName("getSharedSnapshot: var olmayan tenant şeması reddedilir AMP")
+    void getSharedSnapshot_unknownTenantSchema_throws() {
+        doReturn(java.util.List.of()).when(jdbcTemplate)
+                .queryForList(anyString(), any(SqlParameterSource.class));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> shareLinkService.getSharedSnapshot("nope_tenant.validtoken"));
+        org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("Geçersiz"));
+    }
+
+    @Test
+    @DisplayName("getSharedSnapshot: tenant öneki olmayan token reddedilir")
+    void getSharedSnapshot_missingTenantPrefix_throws() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> shareLinkService.getSharedSnapshot("noprefix"));
+        org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("Geçersiz"));
+    }
+
+    @Test
     @DisplayName("getSharedSnapshot: geçerli token snapshot'ı döner")
     void getSharedSnapshot_valid_returnsSnapshot() throws Exception {
         ResultSet rs = mock(ResultSet.class);
@@ -136,7 +161,7 @@ class ShareLinkServiceTest {
         when(objectMapper.readValue(anyString(), eq(StudentDashboardResponse.class))).thenReturn(parsed);
         stubSnapshotQuery(rs);
 
-        StudentDashboardResponse result = shareLinkService.getSharedSnapshot("token-abc");
+        StudentDashboardResponse result = shareLinkService.getSharedSnapshot("tenant_test.token-abc");
 
         assertEquals(new BigDecimal("88.0"), result.getNetScore());
     }
@@ -148,7 +173,7 @@ class ShareLinkServiceTest {
         when(rs.next()).thenReturn(false);
         stubSnapshotQuery(rs);
 
-        assertThrows(IllegalArgumentException.class, () -> shareLinkService.getSharedSnapshot("missing"));
+        assertThrows(IllegalArgumentException.class, () -> shareLinkService.getSharedSnapshot("tenant_test.missing"));
     }
 
     @Test
@@ -160,7 +185,7 @@ class ShareLinkServiceTest {
         stubSnapshotQuery(rs);
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> shareLinkService.getSharedSnapshot("expired"));
+                () -> shareLinkService.getSharedSnapshot("tenant_test.expired"));
         org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("süresi dolmuş"));
     }
 
@@ -174,7 +199,7 @@ class ShareLinkServiceTest {
         stubSnapshotQuery(rs);
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> shareLinkService.getSharedSnapshot("revoked"));
+                () -> shareLinkService.getSharedSnapshot("tenant_test.revoked"));
         org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("iptal"));
     }
 
@@ -188,7 +213,7 @@ class ShareLinkServiceTest {
         stubSnapshotQuery(rs);
 
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> shareLinkService.getSharedSnapshot("both"));
+                () -> shareLinkService.getSharedSnapshot("tenant_test.both"));
         org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("süresi dolmuş"));
     }
 
@@ -205,6 +230,6 @@ class ShareLinkServiceTest {
                 });
         stubSnapshotQuery(rs);
 
-        assertThrows(RuntimeException.class, () -> shareLinkService.getSharedSnapshot("bad"));
+        assertThrows(RuntimeException.class, () -> shareLinkService.getSharedSnapshot("tenant_test.bad"));
     }
 }

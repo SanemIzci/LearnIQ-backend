@@ -1,6 +1,7 @@
 package com.learniq.exam.service;
 
 import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import com.learniq.exam.domain.Exam;
 import com.learniq.exam.domain.StudentExamResult;
 import com.learniq.exam.exception.EntityNotFoundException;
@@ -118,7 +119,9 @@ public class ExamFinalizationService {
     private Map<UUID, UUID> fetchStudentClassrooms(Set<UUID> studentIds) {
         if (studentIds.isEmpty()) return Collections.emptyMap();
         
-        String sql = "SELECT student_id, classroom_id FROM classroom_students WHERE student_id IN (:ids)";
+        String schema = TenantSchemaValidator.requireValid(TenantContext.getCurrentTenant());
+        String sql = "SELECT student_id, classroom_id FROM %s.classroom_students WHERE student_id IN (:ids)"
+                .formatted(schema);
         MapSqlParameterSource params = new MapSqlParameterSource("ids", studentIds);
         
         Map<UUID, UUID> map = new HashMap<>();

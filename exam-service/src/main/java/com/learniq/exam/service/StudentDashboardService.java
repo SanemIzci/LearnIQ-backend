@@ -1,5 +1,7 @@
 package com.learniq.exam.service;
 
+import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import com.learniq.exam.domain.Exam;
 import com.learniq.exam.domain.StudentExamResult;
 import com.learniq.exam.dto.StudentDashboardResponse;
@@ -31,7 +33,9 @@ public class StudentDashboardService {
             throw new IllegalStateException("Sınav henüz sonlandırılmadığı için istatistikler ve sıralamalar görüntülenemez.");
         }
 
-        String classSql = "SELECT classroom_id FROM classroom_students WHERE student_id = :studentId";
+        String schema = TenantSchemaValidator.requireValid(TenantContext.getCurrentTenant());
+        String classSql = "SELECT classroom_id FROM %s.classroom_students WHERE student_id = :studentId"
+                .formatted(schema);
         List<UUID> classIds = jdbcTemplate.queryForList(classSql, Map.of("studentId", studentId), UUID.class);
         if (classIds.isEmpty()) {
             throw new IllegalStateException("Öğrencinin kayıtlı olduğu bir sınıf bulunamadı.");
@@ -40,22 +44,22 @@ public class StudentDashboardService {
 
         String avgSql = """
             SELECT AVG(r.total_score)
-            FROM student_exam_results r
-            JOIN classroom_students cs ON r.student_id = cs.student_id
+            FROM %1$s.student_exam_results r
+            JOIN %1$s.classroom_students cs ON r.student_id = cs.student_id
             WHERE r.exam_id = :examId AND cs.classroom_id = :classroomId AND r.status = 'APPROVED'
-        """;
+            """.formatted(schema);
         BigDecimal classAverage = jdbcTemplate.queryForObject(avgSql,
                 Map.of("examId", examId, "classroomId", classroomId), BigDecimal.class);
 
         String top3Sql = """
             SELECT r.class_rank, r.total_score, u.full_name, u.leaderboard_consent
-            FROM student_exam_results r
-            JOIN classroom_students cs ON r.student_id = cs.student_id
-            JOIN users u ON r.student_id = u.id
+            FROM %1$s.student_exam_results r
+            JOIN %1$s.classroom_students cs ON r.student_id = cs.student_id
+            JOIN %1$s.users u ON r.student_id = u.id
             WHERE r.exam_id = :examId AND cs.classroom_id = :classroomId AND r.status = 'APPROVED'
             ORDER BY r.class_rank ASC, r.created_at ASC
             LIMIT 3
-        """;
+            """.formatted(schema);
 
         List<TopStudentDto> top3 = jdbcTemplate.query(top3Sql,
                 Map.of("examId", examId, "classroomId", classroomId),

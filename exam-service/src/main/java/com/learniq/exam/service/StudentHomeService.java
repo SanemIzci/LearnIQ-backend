@@ -1,5 +1,7 @@
 package com.learniq.exam.service;
 
+import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import com.learniq.exam.domain.Exam;
 import com.learniq.exam.domain.StudentBadge;
 import com.learniq.exam.domain.StudentExamResult;
@@ -29,14 +31,15 @@ public class StudentHomeService {
     @Transactional(readOnly = true)
     public StudentHomeResponseDto getStudentHomeData(UUID studentId) {
         // 1. Fetch Student & Classroom Info using JDBC (tenant schema borders)
+        String schema = TenantSchemaValidator.requireValid(TenantContext.getCurrentTenant());
         String sql = """
             SELECT u.full_name, c.name as classroom_name
-            FROM users u
-            LEFT JOIN classroom_students cs ON u.id = cs.student_id
-            LEFT JOIN classrooms c ON cs.classroom_id = c.id
+            FROM %1$s.users u
+            LEFT JOIN %1$s.classroom_students cs ON u.id = cs.student_id
+            LEFT JOIN %1$s.classrooms c ON cs.classroom_id = c.id
             WHERE u.id = :studentId
             LIMIT 1
-        """;
+            """.formatted(schema);
         
         List<Map<String, Object>> userInfo = jdbcTemplate.queryForList(sql, Map.of("studentId", studentId));
         String studentName = "Öğrenci";

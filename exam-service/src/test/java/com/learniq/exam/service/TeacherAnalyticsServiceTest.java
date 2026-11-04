@@ -1,5 +1,6 @@
 package com.learniq.exam.service;
 
+import com.learniq.common.tenant.TenantContext;
 import com.learniq.exam.dto.ClassroomAnalyticsResponse;
 import com.learniq.exam.dto.ClassroomComparisonResponse;
 import com.learniq.exam.exception.EntityNotFoundException;
@@ -45,6 +46,12 @@ class TeacherAnalyticsServiceTest {
 
     @BeforeEach
     void setUp() {
+        TenantContext.setCurrentTenant(tenantId);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        TenantContext.clear();
     }
 
     @Test
@@ -65,7 +72,7 @@ class TeacherAnalyticsServiceTest {
     @DisplayName("getClassroomAnalytics should throw EntityNotFoundException when classroom does not exist")
     void getClassroomAnalytics_classroomNotFound_throws404() {
         doNothing().when(accessControlService).validateClassroomAccess(tenantId, teacherId, "TEACHER", classroomId);
-        when(jdbcTemplate.queryForObject(contains("SELECT name FROM classrooms"), eq(String.class), eq(classroomId)))
+        when(jdbcTemplate.queryForObject(contains("SELECT name FROM tenant_test.classrooms"), eq(String.class), eq(classroomId)))
                 .thenThrow(new EmptyResultDataAccessException(1));
 
         assertThatThrownBy(() -> teacherAnalyticsService.getClassroomAnalytics(
@@ -78,13 +85,13 @@ class TeacherAnalyticsServiceTest {
     @DisplayName("getClassroomAnalytics should return metrics when exam and results exist")
     void getClassroomAnalytics_success() {
         doNothing().when(accessControlService).validateClassroomAccess(tenantId, teacherId, "TEACHER", classroomId);
-        when(jdbcTemplate.queryForObject(contains("SELECT name FROM classrooms"), eq(String.class), eq(classroomId)))
+        when(jdbcTemplate.queryForObject(contains("SELECT name FROM tenant_test.classrooms"), eq(String.class), eq(classroomId)))
                 .thenReturn("12-A");
-        when(jdbcTemplate.queryForObject(contains("SELECT count(*) FROM classroom_students"), eq(Integer.class), eq(classroomId)))
+        when(jdbcTemplate.queryForObject(contains("SELECT count(*) FROM tenant_test.classroom_students"), eq(Integer.class), eq(classroomId)))
                 .thenReturn(20);
 
         // Exam detail lookup
-        when(jdbcTemplate.queryForObject(contains("SELECT id, title, exam_date, exam_type FROM exams"), any(RowMapper.class), eq(examId)))
+        when(jdbcTemplate.queryForObject(contains("SELECT id, title, exam_date, exam_type FROM tenant_test.exams"), any(RowMapper.class), eq(examId)))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     var rs = mock(java.sql.ResultSet.class);
@@ -139,7 +146,7 @@ class TeacherAnalyticsServiceTest {
         doNothing().when(accessControlService).validateClassroomAccess(anyString(), any(), anyString(), any());
 
         // Exam metadata
-        when(jdbcTemplate.queryForObject(contains("SELECT id, title, exam_date, exam_type FROM exams"), any(RowMapper.class), eq(examId)))
+        when(jdbcTemplate.queryForObject(contains("SELECT id, title, exam_date, exam_type FROM tenant_test.exams"), any(RowMapper.class), eq(examId)))
                 .thenAnswer(invocation -> {
                     RowMapper<?> mapper = invocation.getArgument(1);
                     var rs = mock(java.sql.ResultSet.class);
@@ -151,18 +158,18 @@ class TeacherAnalyticsServiceTest {
                 });
 
         // Classroom 1 queries
-        when(jdbcTemplate.queryForObject(contains("SELECT name FROM classrooms"), eq(String.class), eq(classroomId)))
+        when(jdbcTemplate.queryForObject(contains("SELECT name FROM tenant_test.classrooms"), eq(String.class), eq(classroomId)))
                 .thenReturn("12-A");
-        when(jdbcTemplate.queryForObject(contains("SELECT count(*) FROM classroom_students"), eq(Integer.class), eq(classroomId)))
+        when(jdbcTemplate.queryForObject(contains("SELECT count(*) FROM tenant_test.classroom_students"), eq(Integer.class), eq(classroomId)))
                 .thenReturn(25);
         Map<String, Object> statsA = Map.of("part_count", 20, "avg_score", 320.0);
         when(jdbcTemplate.queryForMap(contains("count(ser.id) as part_count"), eq(classroomId), eq(examId)))
                 .thenReturn(statsA);
 
         // Classroom 2 queries
-        when(jdbcTemplate.queryForObject(contains("SELECT name FROM classrooms"), eq(String.class), eq(classroomB)))
+        when(jdbcTemplate.queryForObject(contains("SELECT name FROM tenant_test.classrooms"), eq(String.class), eq(classroomB)))
                 .thenReturn("12-B");
-        when(jdbcTemplate.queryForObject(contains("SELECT count(*) FROM classroom_students"), eq(Integer.class), eq(classroomB)))
+        when(jdbcTemplate.queryForObject(contains("SELECT count(*) FROM tenant_test.classroom_students"), eq(Integer.class), eq(classroomB)))
                 .thenReturn(24);
         Map<String, Object> statsB = Map.of("part_count", 22, "avg_score", 340.0);
         when(jdbcTemplate.queryForMap(contains("count(ser.id) as part_count"), eq(classroomB), eq(examId)))

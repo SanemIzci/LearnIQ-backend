@@ -1,5 +1,7 @@
 package com.learniq.exam.service;
 
+import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import com.learniq.exam.domain.Exam;
 import com.learniq.exam.domain.StudentExamResult;
 import com.learniq.exam.dto.TrendDataPointDto;
@@ -46,17 +48,18 @@ public class StudentTrendService {
     @Transactional(readOnly = true)
     public List<TrendDataPointDto> getSubjectTrends(UUID studentId, UUID subjectId) {
         // Ders bazlı (Matematik, Türkçe vb.) net trendi
+        String schema = TenantSchemaValidator.requireValid(TenantContext.getCurrentTenant());
         String sql = """
             SELECT e.id, e.title, e.exam_date, sr.net_score
-            FROM student_subject_results sr
-            JOIN exams e ON sr.exam_id = e.id
-            JOIN student_exam_results er ON er.exam_id = e.id AND er.student_id = sr.student_id
+            FROM %1$s.student_subject_results sr
+            JOIN %1$s.exams e ON sr.exam_id = e.id
+            JOIN %1$s.student_exam_results er ON er.exam_id = e.id AND er.student_id = sr.student_id
             WHERE sr.student_id = :studentId 
               AND sr.subject_id = :subjectId 
               AND e.status = 'FINALIZED' 
               AND er.status = 'APPROVED'
             ORDER BY e.exam_date ASC
-        """;
+            """.formatted(schema);
 
         return jdbcTemplate.query(sql, Map.of("studentId", studentId, "subjectId", subjectId), (rs, rowNum) ->
                 TrendDataPointDto.builder()

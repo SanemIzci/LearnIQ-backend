@@ -1,5 +1,7 @@
 package com.learniq.exam.service;
 
+import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -13,7 +15,7 @@ import java.util.UUID;
 
 /**
  * JDBC-based classroom management.
- * Uses SET search_path for multi-tenant schema switching.
+ * All statements are schema-qualified via TenantContext (validated by TenantSchemaValidator).
  */
 @Slf4j
 @Service
@@ -22,19 +24,19 @@ public class ClassroomService {
 
     private final JdbcTemplate jdbcTemplate;
 
-    // ── Schema switcher ──────────────────────────────────────────────────────
+    // ── Schema resolution ────────────────────────────────────────────────────
 
-    private void setSchema(String tenantId) {
-        jdbcTemplate.execute("SET search_path TO " + com.learniq.common.tenant.TenantSchemaValidator.requireValid(tenantId));
+    private String schema() {
+        return TenantSchemaValidator.requireValid(TenantContext.getCurrentTenant());
     }
 
     // ── Classroom CRUD ───────────────────────────────────────────────────────
 
     public Map<String, Object> createClassroom(String tenantId, String name) {
-        setSchema(tenantId);
+        String schema = schema();
         UUID id = UUID.randomUUID();
         jdbcTemplate.update(
-                "INSERT INTO classrooms (id, name) VALUES (?, ?)",
+                "INSERT INTO %s.classrooms (id, name) VALUES (?, ?)".formatted(schema),
                 id, name);
         log.info("Classroom '{}' created in tenant '{}'", name, tenantId);
         return Map.of("id", id.toString(), "name", name);
@@ -42,26 +44,26 @@ public class ClassroomService {
 
     /** ADMIN: returns all classrooms. TEACHER: only their classrooms. */
     public List<Map<String, Object>> listClassrooms(String tenantId, UUID requesterId, String role) {
-        setSchema(tenantId);
+        String schema = schema();
         if ("ADMIN".equals(role) || "SUPER_ADMIN".equals(role)) {
             return jdbcTemplate.queryForList(
-                    "SELECT id, name, created_at FROM classrooms ORDER BY name");
+                    "SELECT id, name, created_at FROM %s.classrooms ORDER BY name".formatted(schema));
         }
         // TEACHER — only classrooms they are assigned to
         return jdbcTemplate.queryForList(
                 """
                 SELECT c.id, c.name, c.created_at
-                FROM classrooms c
-                JOIN classroom_teachers ct ON ct.classroom_id = c.id
+                FROM %1$s.classrooms c
+                JOIN %1$s.classroom_teachers ct ON ct.classroom_id = c.id
                 WHERE ct.teacher_id = ?
                 ORDER BY c.name
-                """, requesterId);
+                """.formatted(schema), requesterId);
     }
 
     public Map<String, Object> getClassroom(String tenantId, UUID classroomId) {
-        setSchema(tenantId);
+        String schema = schema();
         var rows = jdbcTemplate.queryForList(
-                "SELECT id, name, created_at FROM classrooms WHERE id = ?",
+                "SELECT id, name, created_at FROM %s.classrooms WHERE id = ?".formatted(schema),
                 classroomId);
         if (rows.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Classroom not found");
@@ -72,19 +74,20 @@ public class ClassroomService {
     // ── Teacher management ───────────────────────────────────────────────────
 
     public void addTeacher(String tenantId, UUID classroomId, UUID teacherId) {
-        assertClassroomExists(tenantId, classroomId);
-        assertUserExists(tenantId, teacherId, "TEACHER");
-        setSchema(tenantId);
+        String schema = schema();
+        assertClassroomExists(schema, classroomId);
+        assertUserExists(schema, teacherId, "TEACHER");
         jdbcTemplate.update(
-                "INSERT INTO classroom_teachers (classroom_id, teacher_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                "INSERT INTO %s.classroom_teachers (classroom_id, teacher_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
+                        .formatted(schema),
                 classroomId, teacherId);
         log.info("Teacher {} added to classroom {} in tenant {}", teacherId, classroomId, tenantId);
     }
 
     public void removeTeacher(String tenantId, UUID classroomId, UUID teacherId) {
-        setSchema(tenantId);
+        String schema = schema();
         int rows = jdbcTemplate.update(
-                "DELETE FROM classroom_teachers WHERE classroom_id = ? AND teacher_id = ?",
+                "DELETE FROM %s.classroom_teachers WHERE classroom_id = ? AND teacher_id = ?".formatted(schema),
                 classroomId, teacherId);
         if (rows == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Teacher not found in this classroom");
@@ -92,34 +95,35 @@ public class ClassroomService {
     }
 
     public List<Map<String, Object>> listTeachers(String tenantId, UUID classroomId) {
-        assertClassroomExists(tenantId, classroomId);
-        setSchema(tenantId);
+        String schema = schema();
+        assertClassroomExists(schema, classroomId);
         return jdbcTemplate.queryForList(
                 """
                 SELECT u.id, u.username, u.full_name, u.email
-                FROM users u
-                JOIN classroom_teachers ct ON ct.teacher_id = u.id
+                FROM %1$s.users u
+                JOIN %1$s.classroom_teachers ct ON ct.teacher_id = u.id
                 WHERE ct.classroom_id = ?
                 ORDER BY u.full_name
-                """, classroomId);
+                """.formatted(schema), classroomId);
     }
 
     // ── Student management ───────────────────────────────────────────────────
 
     public void addStudent(String tenantId, UUID classroomId, UUID studentId) {
-        assertClassroomExists(tenantId, classroomId);
-        assertUserExists(tenantId, studentId, "STUDENT");
-        setSchema(tenantId);
+        String schema = schema();
+        assertClassroomExists(schema, classroomId);
+        assertUserExists(schema, studentId, "STUDENT");
         jdbcTemplate.update(
-                "INSERT INTO classroom_students (classroom_id, student_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                "INSERT INTO %s.classroom_students (classroom_id, student_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
+                        .formatted(schema),
                 classroomId, studentId);
         log.info("Student {} added to classroom {} in tenant {}", studentId, classroomId, tenantId);
     }
 
     public void removeStudent(String tenantId, UUID classroomId, UUID studentId) {
-        setSchema(tenantId);
+        String schema = schema();
         int rows = jdbcTemplate.update(
-                "DELETE FROM classroom_students WHERE classroom_id = ? AND student_id = ?",
+                "DELETE FROM %s.classroom_students WHERE classroom_id = ? AND student_id = ?".formatted(schema),
                 classroomId, studentId);
         if (rows == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Student not found in this classroom");
@@ -127,33 +131,31 @@ public class ClassroomService {
     }
 
     public List<Map<String, Object>> listStudents(String tenantId, UUID classroomId) {
-        assertClassroomExists(tenantId, classroomId);
-        setSchema(tenantId);
+        String schema = schema();
+        assertClassroomExists(schema, classroomId);
         return jdbcTemplate.queryForList(
                 """
                 SELECT u.id, u.username, u.full_name, u.email
-                FROM users u
-                JOIN classroom_students cs ON cs.student_id = u.id
+                FROM %1$s.users u
+                JOIN %1$s.classroom_students cs ON cs.student_id = u.id
                 WHERE cs.classroom_id = ?
                 ORDER BY u.full_name
-                """, classroomId);
+                """.formatted(schema), classroomId);
     }
 
     // ── Guards ───────────────────────────────────────────────────────────────
 
-    private void assertClassroomExists(String tenantId, UUID classroomId) {
-        setSchema(tenantId);
+    private void assertClassroomExists(String schema, UUID classroomId) {
         var rows = jdbcTemplate.queryForList(
-                "SELECT 1 FROM classrooms WHERE id = ?", classroomId);
+                "SELECT 1 FROM %s.classrooms WHERE id = ?".formatted(schema), classroomId);
         if (rows.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Classroom not found");
         }
     }
 
-    private void assertUserExists(String tenantId, UUID userId, String expectedRole) {
-        setSchema(tenantId);
+    private void assertUserExists(String schema, UUID userId, String expectedRole) {
         var rows = jdbcTemplate.queryForList(
-                "SELECT 1 FROM users WHERE id = ? AND role = ? AND active = TRUE",
+                "SELECT 1 FROM %s.users WHERE id = ? AND role = ? AND active = TRUE".formatted(schema),
                 userId, expectedRole);
         if (rows.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,
