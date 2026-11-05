@@ -123,6 +123,42 @@ class StudentExamControllerIntegrationTest {
                 .andExpect(jsonPath("$.status").value("PENDING"));
     }
 
+    @Test
+    @DisplayName("GET /api/v1/students/me/exams/{examId}/ai-report - 200 OK returns report status")
+    void getAiReportStatus_success() throws Exception {
+        UUID examId = UUID.randomUUID();
+        UUID studentId = UUID.randomUUID();
+
+        com.learniq.exam.dto.AiReportResponseDto mockResponse = com.learniq.exam.dto.AiReportResponseDto.builder()
+                .id(UUID.randomUUID().toString())
+                .status("COMPLETED")
+                .summary("Güçlü yönler: Matematik, Geliştirilmeli: Fizik")
+                .build();
+
+        when(aiReportService.getReportStatus(examId, studentId)).thenReturn(mockResponse);
+
+        mockMvc.perform(get("/api/v1/students/me/exams/{examId}/ai-report", examId)
+                .header("X-User-Id", studentId.toString())
+                .header("X-User-Role", "STUDENT")
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.summary").value("Güçlü yönler: Matematik, Geliştirilmeli: Fizik"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/students/me/exams/{examId}/ai-report - 403 Forbidden for non-student")
+    void getAiReportStatus_wrongRole_returns403() throws Exception {
+        UUID examId = UUID.randomUUID();
+        UUID teacherId = UUID.randomUUID();
+
+        mockMvc.perform(get("/api/v1/students/me/exams/{examId}/ai-report", examId)
+                .header("X-User-Id", teacherId.toString())
+                .header("X-User-Role", "TEACHER")
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isForbidden());
+    }
+
     // ── Student Exam Discovery Tests ─────────────────────────────────────────
 
     @Test

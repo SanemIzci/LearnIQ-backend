@@ -85,6 +85,7 @@ public class ReportGenerationService {
     private void publishCompletedEvent(String reportId, String s3Key, String summary, String studentId, String tenantId) {
         Map<String, Object> completedEvent = new HashMap<>();
         completedEvent.put("eventType", "AI_REPORT_COMPLETED");
+        completedEvent.put("status", "COMPLETED");
         completedEvent.put("reportId", reportId);
         completedEvent.put("s3Key", s3Key);
         completedEvent.put("summary", summary);
@@ -97,6 +98,26 @@ public class ReportGenerationService {
             log.info("Published ai-report-completed event for reportId: {}, s3Key: {}", reportId, s3Key);
         } catch (JsonProcessingException e) {
             log.error("Failed to serialize ai-report-completed event for reportId: {}", reportId, e);
+        }
+    }
+
+    public void publishFailedEvent(String reportId, String studentId, String tenantId, String userSafeError) {
+        if (reportId == null) return;
+        Map<String, Object> failedEvent = new HashMap<>();
+        failedEvent.put("eventType", "AI_REPORT_FAILED");
+        failedEvent.put("status", "FAILED");
+        failedEvent.put("reportId", reportId);
+        failedEvent.put("studentId", studentId);
+        failedEvent.put("tenantId", tenantId);
+        // Güvenli kullanıcı mesajı; hassas sistem detayları, API anahtarları veya stack trace asla sızdırılmaz
+        failedEvent.put("error", userSafeError != null && !userSafeError.isBlank() ? userSafeError : "Rapor oluşturulamadı.");
+
+        try {
+            String jsonPayload = objectMapper.writeValueAsString(failedEvent);
+            kafkaTemplate.send("ai-report-completed", reportId, jsonPayload);
+            log.info("Published ai-report-completed failure event for reportId: {}", reportId);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize ai-report-completed failure event for reportId: {}", reportId, e);
         }
     }
 

@@ -74,12 +74,20 @@ public class ClassroomController {
      * TEACHER → only their assigned classrooms
      */
     @GetMapping
-    public ResponseEntity<List<Map<String, Object>>> listClassrooms(
+    public ResponseEntity<?> listClassrooms(
             @RequestHeader("X-Tenant-Id") String tenantId,
             @RequestHeader("X-User-Role")  String role,
-            @RequestHeader("X-User-Id")    String userId) {
+            @RequestHeader("X-User-Id")    String userId,
+            @RequestParam(name = "page", required = false) Integer page,
+            @RequestParam(name = "size", required = false) Integer size) {
 
         requireAdminOrTeacher(role);
+        if (page != null || size != null) {
+            int p = page != null ? page : 0;
+            int s = size != null ? size : 20;
+            return ResponseEntity.ok(classroomService.listClassrooms(
+                    tenantId, UUID.fromString(userId), role, p, s));
+        }
         List<Map<String, Object>> classrooms = classroomService.listClassrooms(
                 tenantId, UUID.fromString(userId), role);
         return ResponseEntity.ok(classrooms);

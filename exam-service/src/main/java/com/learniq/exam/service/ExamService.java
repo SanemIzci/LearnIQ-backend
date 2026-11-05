@@ -61,6 +61,36 @@ public class ExamService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public com.learniq.common.api.PageResponse<ExamResponse> listExams(int page, int size, String sort) {
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+
+        org.springframework.data.domain.Sort sortObj = org.springframework.data.domain.Sort.by(
+                org.springframework.data.domain.Sort.Direction.DESC, "examDate");
+
+        if (sort != null && !sort.isBlank()) {
+            String[] parts = sort.split(",");
+            String field = parts[0].trim();
+            org.springframework.data.domain.Sort.Direction dir = (parts.length > 1 && "asc".equalsIgnoreCase(parts[1].trim()))
+                    ? org.springframework.data.domain.Sort.Direction.ASC
+                    : org.springframework.data.domain.Sort.Direction.DESC;
+            if ("examDate".equalsIgnoreCase(field) || "title".equalsIgnoreCase(field) || "createdAt".equalsIgnoreCase(field)) {
+                sortObj = org.springframework.data.domain.Sort.by(dir, field);
+            }
+        }
+
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(safePage, safeSize, sortObj);
+        org.springframework.data.domain.Page<Exam> examPage = examRepository.findAll(pageable);
+
+        List<ExamResponse> dtoList = examPage.getContent().stream()
+                .map(this::toResponse)
+                .toList();
+
+        return new com.learniq.common.api.PageResponse<>(
+                dtoList, examPage.getTotalElements(), safePage, safeSize, examPage.getTotalPages());
+    }
+
     // ── Endpoint #3: Get Single Exam ───────────────────────────────────────────
 
     @Transactional(readOnly = true)

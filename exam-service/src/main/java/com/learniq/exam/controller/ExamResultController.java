@@ -36,13 +36,24 @@ public class ExamResultController {
     }
 
     @GetMapping
-    public ResponseEntity<List<StudentExamResult>> getResultsByStatus(
+    public ResponseEntity<?> getResultsByStatus(
             @PathVariable UUID examId,
             @RequestHeader("X-User-Role") String role,
-            @RequestParam(defaultValue = "SUBMITTED") StudentExamResult.ResultStatus status) {
+            @RequestParam(defaultValue = "SUBMITTED") StudentExamResult.ResultStatus status,
+            @RequestParam(name = "page", required = false) Integer page,
+            @RequestParam(name = "size", required = false) Integer size) {
         
         if (!"ADMIN".equals(role) && !"TEACHER".equals(role)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        if (page != null || size != null) {
+            int safePage = Math.max(page != null ? page : 0, 0);
+            int safeSize = Math.min(Math.max(size != null ? size : 20, 1), 100);
+            org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(
+                    safePage, safeSize, org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt"));
+            org.springframework.data.domain.Page<StudentExamResult> resultPage =
+                    studentExamResultRepository.findByExamIdAndStatus(examId, status, pageable);
+            return ResponseEntity.ok(com.learniq.common.api.PageResponse.from(resultPage));
         }
         return ResponseEntity.ok(studentExamResultRepository.findByExamIdAndStatus(examId, status));
     }

@@ -66,4 +66,5 @@ spring.log
 # .mvn/
 
 # local docs
-/docs/
+/docs/*
+!/docs/openapi.yaml

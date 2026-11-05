@@ -1,43 +1,50 @@
 package com.learniq.exam.exception;
 
+import com.learniq.common.api.ErrorResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    private String path(HttpServletRequest request) {
+        return request != null ? request.getRequestURI() : null;
+    }
+
     /**
      * Handles our custom typed not-found exceptions.
-     * Returns HTTP 404 with a structured JSON body.
+     * Returns HTTP 404 with standard ErrorResponse.
      */
     @ExceptionHandler(EntityNotFoundException.class)
-    public ResponseEntity<ApiError> handleEntityNotFound(EntityNotFoundException ex) {
+    public ResponseEntity<ErrorResponse> handleEntityNotFound(EntityNotFoundException ex, HttpServletRequest request) {
         log.warn("Entity not found: {}", ex.getMessage());
-        ApiError error = new ApiError(
+        ErrorResponse error = ErrorResponse.of(
                 HttpStatus.NOT_FOUND.value(),
-                "Not Found",
-                List.of(ex.getMessage()),
-                LocalDateTime.now()
+                "NOT_FOUND",
+                ex.getMessage(),
+                path(request)
         );
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
     }
 
     /**
      * Handles Bean Validation failures (@Valid on request DTOs).
-     * Collects all field-level constraint violations into a list.
+     * Collects all field-level constraint violations into details list.
      * Returns HTTP 400.
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiError> handleValidationErrors(MethodArgumentNotValidException ex) {
+    public ResponseEntity<ErrorResponse> handleValidationErrors(MethodArgumentNotValidException ex, HttpServletRequest request) {
         List<String> messages = ex.getBindingResult()
                 .getFieldErrors()
                 .stream()
@@ -45,11 +52,12 @@ public class GlobalExceptionHandler {
                 .toList();
 
         log.warn("Validation failed: {}", messages);
-        ApiError error = new ApiError(
+        ErrorResponse error = ErrorResponse.of(
                 HttpStatus.BAD_REQUEST.value(),
                 "Validation Failed",
+                "Request validation failed",
                 messages,
-                LocalDateTime.now()
+                path(request)
         );
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
@@ -59,13 +67,13 @@ public class GlobalExceptionHandler {
      * Returns HTTP 409 Conflict.
      */
     @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<ApiError> handleIllegalStateException(IllegalStateException ex) {
+    public ResponseEntity<ErrorResponse> handleIllegalStateException(IllegalStateException ex, HttpServletRequest request) {
         log.warn("Business state conflict: {}", ex.getMessage());
-        ApiError error = new ApiError(
+        ErrorResponse error = ErrorResponse.of(
                 HttpStatus.CONFLICT.value(),
                 "State Conflict",
-                List.of(ex.getMessage()),
-                LocalDateTime.now()
+                ex.getMessage(),
+                path(request)
         );
         return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
     }
@@ -75,13 +83,13 @@ public class GlobalExceptionHandler {
      * Returns HTTP 400 Bad Request.
      */
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ApiError> handleIllegalArgumentException(IllegalArgumentException ex) {
+    public ResponseEntity<ErrorResponse> handleIllegalArgumentException(IllegalArgumentException ex, HttpServletRequest request) {
         log.warn("Invalid business argument: {}", ex.getMessage());
-        ApiError error = new ApiError(
+        ErrorResponse error = ErrorResponse.of(
                 HttpStatus.BAD_REQUEST.value(),
                 "Bad Request",
-                List.of(ex.getMessage()),
-                LocalDateTime.now()
+                ex.getMessage(),
+                path(request)
         );
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
@@ -92,13 +100,13 @@ public class GlobalExceptionHandler {
      * Returns HTTP 409 Conflict.
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ApiError> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+    public ResponseEntity<ErrorResponse> handleDataIntegrityViolation(DataIntegrityViolationException ex, HttpServletRequest request) {
         log.error("Data integrity violation: {}", ex.getMostSpecificCause().getMessage());
-        ApiError error = new ApiError(
+        ErrorResponse error = ErrorResponse.of(
                 HttpStatus.CONFLICT.value(),
-                "Data Conflict",
-                List.of("A record with the provided data already exists."),
-                LocalDateTime.now()
+                "DATA_CONFLICT",
+                "A record with the provided data already exists.",
+                path(request)
         );
         return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
     }
@@ -107,31 +115,39 @@ public class GlobalExceptionHandler {
      * Handles Spring's ResponseStatusException (e.g. 403 Forbidden, 400 Bad Request)
      * Thrown by our services and controllers for standard HTTP error mappings.
      */
-    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
-    public ResponseEntity<ApiError> handleResponseStatusException(org.springframework.web.server.ResponseStatusException ex) {
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ErrorResponse> handleResponseStatusException(ResponseStatusException ex, HttpServletRequest request) {
         log.warn("Response status exception: {} - {}", ex.getStatusCode(), ex.getReason());
-        ApiError error = new ApiError(
-                ex.getStatusCode().value(),
-                ex.getStatusCode().toString(),
-                List.of(ex.getReason() != null ? ex.getReason() : "Error occurred"),
-                LocalDateTime.now()
+        int status = ex.getStatusCode().value();
+        String code = switch (status) {
+            case 400 -> "BAD_REQUEST";
+            case 403 -> "FORBIDDEN";
+            case 404 -> "NOT_FOUND";
+            case 409 -> "CONFLICT";
+            default -> ex.getStatusCode().toString();
+        };
+        String message = ex.getReason() != null ? ex.getReason() : "Error occurred";
+        ErrorResponse error = ErrorResponse.of(
+                status,
+                code,
+                message,
+                path(request)
         );
         return ResponseEntity.status(ex.getStatusCode()).body(error);
     }
 
     /**
      * Handles missing identity headers (X-User-Role, X-Tenant-Id, X-User-Id),
-     * which are required by the fail-closed RBAC endpoints. Fail-closed contract:
-     * eksik kimlik header'ı → 400 (istek eksik), yanlış rol → 403.
+     * which are required by the fail-closed RBAC endpoints.
      */
-    @ExceptionHandler(org.springframework.web.bind.MissingRequestHeaderException.class)
-    public ResponseEntity<ApiError> handleMissingRequestHeader(org.springframework.web.bind.MissingRequestHeaderException ex) {
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ErrorResponse> handleMissingRequestHeader(MissingRequestHeaderException ex, HttpServletRequest request) {
         log.warn("Missing required header: {}", ex.getHeaderName());
-        ApiError error = new ApiError(
+        ErrorResponse error = ErrorResponse.of(
                 HttpStatus.BAD_REQUEST.value(),
-                "Bad Request",
-                List.of("Required header '" + ex.getHeaderName() + "' is missing."),
-                LocalDateTime.now()
+                "BAD_REQUEST",
+                "Required header '" + ex.getHeaderName() + "' is missing.",
+                path(request)
         );
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
     }
@@ -141,13 +157,13 @@ public class GlobalExceptionHandler {
      * Returns HTTP 500 without leaking stack trace details to the client.
      */
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiError> handleGenericException(Exception ex) {
+    public ResponseEntity<ErrorResponse> handleGenericException(Exception ex, HttpServletRequest request) {
         log.error("Unexpected error occurred", ex);
-        ApiError error = new ApiError(
+        ErrorResponse error = ErrorResponse.of(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
-                "Internal Server Error",
-                List.of("An unexpected error occurred. Please contact support."),
-                LocalDateTime.now()
+                "INTERNAL_SERVER_ERROR",
+                "An unexpected error occurred. Please contact support.",
+                path(request)
         );
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
     }

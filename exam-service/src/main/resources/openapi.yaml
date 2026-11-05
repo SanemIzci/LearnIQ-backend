@@ -1,0 +1,571 @@
+openapi: 3.1.0
+info:
+  title: LearnIQ Platform API
+  version: 1.0.0
+  description: |
+    Multi-tenant Educational Platform Backend API.
+    
+    ### Architecture & Multi-Tenancy:
+    - Microservices monorepo behind API Gateway (port 8080).
+    - Database isolation via PostgreSQL tenant schemas.
+    - Identity & tenant context propagated through validated headers:
+      - `X-Tenant-Id`: Tenant schema identifier (e.g. `tenant_abc`).
+      - `X-User-Id`: Authenticated user UUID.
+      - `X-User-Role`: User role (`SUPER_ADMIN`, `ADMIN`, `TEACHER`, `STUDENT`).
+    
+    ### API Standards:
+    - Standardized `ErrorResponse` for all error responses: `{ timestamp, status, error, message, details, path }`.
+    - Standardized `PageResponse` for paginated listings: `{ content, totalElements, page, size, totalPages }`.
+    - Fail-closed RBAC security model.
+servers:
+  - url: http://localhost:8080
+    description: API Gateway (Main entry point)
+  - url: http://localhost:8081
+    description: Auth Service (Direct)
+  - url: http://localhost:8082
+    description: Exam Service (Direct)
+  - url: http://localhost:8084
+    description: AI Service (Direct)
+
+paths:
+  # ── Auth Service ────────────────────────────────────────────────────────────
+  /api/v1/auth/login:
+    post:
+      summary: Tenant User Login
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/auth/refresh:
+    post:
+      summary: Refresh Access Token
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/platform/auth/login:
+    post:
+      summary: Platform Super Admin Login
+      tags: [Platform Administration]
+      description: Accessible without Bearer token. Authenticates global SUPER_ADMIN.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Platform login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/v1/users:
+    get:
+      summary: List Tenant Users
+      tags: [User Management]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: role
+          in: query
+          schema: { type: string, enum: [ADMIN, TEACHER, STUDENT] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: User list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # ── Exam Service ────────────────────────────────────────────────────────────
+  /api/v1/exams:
+    get:
+      summary: List Exams
+      tags: [Exams]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: sort
+          in: query
+          required: false
+          schema: { type: string, default: "examDate,desc" }
+      responses:
+        '200':
+          description: Paginated or full list of exams
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PageResponse'
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/ExamResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+    post:
+      summary: Create Exam
+      tags: [Exams]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExamCreateRequest'
+      responses:
+        '201':
+          description: Exam created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/exams/{examId}:
+    get:
+      summary: Get Single Exam
+      tags: [Exams]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    put:
+      summary: Update Exam (Partial / PATCH semantics)
+      tags: [Exams]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExamUpdateRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    delete:
+      summary: Delete Exam
+      tags: [Exams]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Exam deleted
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/exams/{examId}/classrooms:
+    get:
+      summary: List Classrooms Assigned to Exam
+      tags: [Exam Classrooms]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Assigned classrooms list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    name: { type: string }
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    post:
+      summary: Assign Classroom to Exam (via Request Body)
+      tags: [Exam Classrooms]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignClassroomRequest'
+      responses:
+        '200':
+          description: Classroom assigned to exam
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/exams/{examId}/classrooms/{classroomId}:
+    post:
+      summary: Assign Classroom to Exam (via Path Parameter)
+      tags: [Exam Classrooms]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: classroomId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+    delete:
+      summary: Unassign Classroom from Exam
+      tags: [Exam Classrooms]
+      description: Removes exam from classroom. Preserves all historical student exam results.
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: classroomId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Classroom unassigned successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/exams/{examId}/finalize:
+    post:
+      summary: Finalize Exam
+      tags: [Exams]
+      description: Closes exam, computes school and class rankings and percentiles.
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Exam finalized
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+
+  /api/v1/students/me/exams:
+    get:
+      summary: List Student's Assigned Exams
+      tags: [Student Discovery]
+      description: Returns only exams assigned to the authenticated student's classroom(s).
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [OPEN, FINALIZED, ALL], default: OPEN }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExamResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/v1/students/me/exams/{examId}/ai-report:
+    post:
+      summary: Request AI Performance Report for Exam
+      tags: [AI Reports]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiReportResponseDto'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+    get:
+      summary: Get AI Report Status for Exam
+      tags: [AI Reports]
+      description: Polls the current status of the student's AI report.
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiReportResponseDto'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/v1/reports/ai/{reportId}:
+    get:
+      summary: Get AI Report Status by Report ID
+      tags: [AI Reports]
+      description: Fetches AI report status and metadata by report UUID with ownership verification.
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiReportResponseDto'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequestError:
+      description: Invalid request parameters or missing required headers
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnauthorizedError:
+      description: Invalid credentials or expired authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ForbiddenError:
+      description: Authenticated caller lacks permission for this resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFoundError:
+      description: Requested resource was not found in the current tenant
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ConflictError:
+      description: Resource state conflict or unique constraint violation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [timestamp, status, error, message]
+      properties:
+        timestamp: { type: string, format: date-time }
+        status: { type: integer, example: 400 }
+        error: { type: string, example: "BAD_REQUEST" }
+        message: { type: string, example: "Request validation failed" }
+        details:
+          type: array
+          items: { type: string }
+        path: { type: string, example: "/api/v1/exams" }
+
+    PageResponse:
+      type: object
+      required: [content, totalElements, page, size, totalPages]
+      properties:
+        content:
+          type: array
+          items: {}
+        totalElements: { type: integer, example: 42 }
+        page: { type: integer, example: 0 }
+        size: { type: integer, example: 20 }
+        totalPages: { type: integer, example: 3 }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+
+    TokenResponse:
+      type: object
+      required: [accessToken, refreshToken, tokenType]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        tokenType: { type: string, example: "Bearer" }
+        expiresIn: { type: integer }
+
+    ExamCreateRequest:
+      type: object
+      required: [title, examDate, examType]
+      properties:
+        title: { type: string, example: "Haziran TYT Denemesi" }
+        examDate: { type: string, format: date, example: "2025-06-15" }
+        examType: { type: string, example: "TYT" }
+
+    ExamUpdateRequest:
+      type: object
+      properties:
+        title: { type: string }
+        examDate: { type: string, format: date }
+        examType: { type: string }
+
+    AssignClassroomRequest:
+      type: object
+      required: [classroomId]
+      properties:
+        classroomId: { type: string, format: uuid }
+
+    ExamResponse:
+      type: object
+      required: [id, title, examDate, examType]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        examDate: { type: string, format: date }
+        examType: { type: string }
+        subjects:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+        classroomIds:
+          type: array
+          items: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+
+    AiReportResponseDto:
+      type: object
+      required: [status]
+      properties:
+        id: { type: string }
+        status:
+          type: string
+          enum: [PENDING, PROCESSING, COMPLETED, FAILED]
+          example: "COMPLETED"
+        summary: { type: string }
+        s3Key: { type: string }
+        requestedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }

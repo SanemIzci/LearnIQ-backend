@@ -60,6 +60,49 @@ public class ClassroomService {
                 """.formatted(schema), requesterId);
     }
 
+    public com.learniq.common.api.PageResponse<Map<String, Object>> listClassrooms(
+            String tenantId, UUID requesterId, String role, int page, int size) {
+        String schema = schema();
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        int offset = safePage * safeSize;
+
+        String countSql;
+        String dataSql;
+        Object[] countArgs;
+        Object[] dataArgs;
+
+        if ("ADMIN".equals(role) || "SUPER_ADMIN".equals(role)) {
+            countSql = "SELECT COUNT(*) FROM %s.classrooms".formatted(schema);
+            countArgs = new Object[]{};
+            dataSql = "SELECT id, name, created_at FROM %s.classrooms ORDER BY name LIMIT ? OFFSET ?".formatted(schema);
+            dataArgs = new Object[]{safeSize, offset};
+        } else {
+            countSql = """
+                    SELECT COUNT(*)
+                    FROM %1$s.classrooms c
+                    JOIN %1$s.classroom_teachers ct ON ct.classroom_id = c.id
+                    WHERE ct.teacher_id = ?
+                    """.formatted(schema);
+            countArgs = new Object[]{requesterId};
+            dataSql = """
+                    SELECT c.id, c.name, c.created_at
+                    FROM %1$s.classrooms c
+                    JOIN %1$s.classroom_teachers ct ON ct.classroom_id = c.id
+                    WHERE ct.teacher_id = ?
+                    ORDER BY c.name
+                    LIMIT ? OFFSET ?
+                    """.formatted(schema);
+            dataArgs = new Object[]{requesterId, safeSize, offset};
+        }
+
+        Long total = jdbcTemplate.queryForObject(countSql, Long.class, countArgs);
+        long totalElements = total != null ? total : 0;
+        List<Map<String, Object>> content = jdbcTemplate.queryForList(dataSql, dataArgs);
+
+        return com.learniq.common.api.PageResponse.of(content, totalElements, safePage, safeSize);
+    }
+
     public Map<String, Object> getClassroom(String tenantId, UUID classroomId) {
         String schema = schema();
         var rows = jdbcTemplate.queryForList(

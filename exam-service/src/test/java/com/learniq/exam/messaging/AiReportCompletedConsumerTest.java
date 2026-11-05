@@ -124,4 +124,41 @@ class AiReportCompletedConsumerTest {
         assertEquals("reports/x.md", report.getS3Key());
         verify(aiReportRepository, times(2)).save(report);
     }
+
+    @Test
+    @DisplayName("consume - FAILED eventi geldiğinde rapor durumu FAILED olur ve güvenli mesaj kaydedilir")
+    void consume_failedStatus_updatesReportToFailed() {
+        UUID reportId = UUID.randomUUID();
+        String jsonMessage = String.format(
+                "{\"reportId\":\"%s\",\"status\":\"FAILED\",\"error\":\"Rapor oluşturulurken bir hata oluştu.\"}", reportId);
+
+        AiReport report = new AiReport();
+        report.setId(reportId);
+        report.setStatus(AiReport.ReportStatus.PROCESSING);
+        when(aiReportRepository.findById(reportId)).thenReturn(Optional.of(report));
+
+        consumer.consume(jsonMessage);
+
+        assertEquals(AiReport.ReportStatus.FAILED, report.getStatus());
+        assertEquals("Rapor oluşturulurken bir hata oluştu.", report.getSummary());
+        verify(aiReportRepository).save(report);
+    }
+
+    @Test
+    @DisplayName("consume - PROCESSING eventi geldiğinde rapor durumu PROCESSING olur")
+    void consume_processingStatus_updatesReportToProcessing() {
+        UUID reportId = UUID.randomUUID();
+        String jsonMessage = String.format(
+                "{\"reportId\":\"%s\",\"status\":\"PROCESSING\"}", reportId);
+
+        AiReport report = new AiReport();
+        report.setId(reportId);
+        report.setStatus(AiReport.ReportStatus.PENDING);
+        when(aiReportRepository.findById(reportId)).thenReturn(Optional.of(report));
+
+        consumer.consume(jsonMessage);
+
+        assertEquals(AiReport.ReportStatus.PROCESSING, report.getStatus());
+        verify(aiReportRepository).save(report);
+    }
 }

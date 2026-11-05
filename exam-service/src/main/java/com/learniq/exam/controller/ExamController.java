@@ -76,8 +76,17 @@ public class ExamController {
      * Lists all exams for the current tenant, ordered by exam date descending.
      */
     @GetMapping
-    public ResponseEntity<List<ExamResponse>> listExams(@RequestHeader("X-User-Role") String role) {
+    public ResponseEntity<?> listExams(
+            @RequestHeader("X-User-Role") String role,
+            @RequestParam(name = "page", required = false) Integer page,
+            @RequestParam(name = "size", required = false) Integer size,
+            @RequestParam(name = "sort", required = false, defaultValue = "examDate,desc") String sort) {
         requireStaffRole(role);
+        if (page != null || size != null) {
+            int p = page != null ? page : 0;
+            int s = size != null ? size : 20;
+            return ResponseEntity.ok(examService.listExams(p, s, sort));
+        }
         return ResponseEntity.ok(examService.listExams());
     }
 

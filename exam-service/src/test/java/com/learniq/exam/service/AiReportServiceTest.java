@@ -215,4 +215,67 @@ class AiReportServiceTest {
         assertTrue(mathIdx >= 0 && turkceIdx >= 0, "payload her iki dersi içermeli: " + payload);
         assertTrue(mathIdx < turkceIdx, "Matematik, Türkçe'den önce sıralanmalı: " + payload);
     }
+
+    @Test
+    @DisplayName("getReportStatus - Rapor bulunduğunda DTO döner")
+    void getReportStatus_found_returnsDto() {
+        when(examResultRepository.findByExamIdAndStudentId(EXAM_ID, STUDENT_ID))
+                .thenReturn(Optional.of(examResult(Exam.ExamStatus.FINALIZED, StudentExamResult.ResultStatus.APPROVED)));
+        when(subjectResultRepository.findByStudentIdAndExamId(STUDENT_ID, EXAM_ID)).thenReturn(List.of());
+        when(fingerprintService.generateHash(anyString())).thenReturn("status-hash");
+
+        AiReport report = AiReport.builder()
+                .id(UUID.randomUUID())
+                .status(AiReport.ReportStatus.PROCESSING)
+                .summary("Rapor hazırlanıyor")
+                .build();
+        when(aiReportRepository.findByStudentIdAndDataHash(STUDENT_ID, "status-hash"))
+                .thenReturn(Optional.of(report));
+
+        AiReportResponseDto result = aiReportService.getReportStatus(EXAM_ID, STUDENT_ID);
+
+        assertEquals("PROCESSING", result.getStatus());
+        assertEquals("Rapor hazırlanıyor", result.getSummary());
+        assertEquals(report.getId().toString(), result.getId());
+    }
+
+    @Test
+    @DisplayName("getReportStatus - Rapor bulunamadığında EntityNotFoundException")
+    void getReportStatus_notFound_throwsException() {
+        when(examResultRepository.findByExamIdAndStudentId(EXAM_ID, STUDENT_ID))
+                .thenReturn(Optional.of(examResult(Exam.ExamStatus.FINALIZED, StudentExamResult.ResultStatus.APPROVED)));
+        when(subjectResultRepository.findByStudentIdAndExamId(STUDENT_ID, EXAM_ID)).thenReturn(List.of());
+        when(fingerprintService.generateHash(anyString())).thenReturn("status-hash");
+        when(aiReportRepository.findByStudentIdAndDataHash(STUDENT_ID, "status-hash"))
+                .thenReturn(Optional.empty());
+
+        assertThrows(EntityNotFoundException.class, () -> aiReportService.getReportStatus(EXAM_ID, STUDENT_ID));
+    }
+
+    @Test
+    @DisplayName("getReportById - Rapor bulunduğunda DTO döner")
+    void getReportById_found_returnsDto() {
+        UUID reportId = UUID.randomUUID();
+        AiReport report = AiReport.builder()
+                .id(reportId)
+                .status(AiReport.ReportStatus.COMPLETED)
+                .summary("Analiz tamamlandı")
+                .s3Key("reports/test.md")
+                .build();
+        when(aiReportRepository.findById(reportId)).thenReturn(Optional.of(report));
+
+        AiReportResponseDto result = aiReportService.getReportById(reportId);
+
+        assertEquals("COMPLETED", result.getStatus());
+        assertEquals("reports/test.md", result.getS3Key());
+    }
+
+    @Test
+    @DisplayName("getReportById - Rapor bulunamadığında EntityNotFoundException")
+    void getReportById_notFound_throwsException() {
+        UUID reportId = UUID.randomUUID();
+        when(aiReportRepository.findById(reportId)).thenReturn(Optional.empty());
+
+        assertThrows(EntityNotFoundException.class, () -> aiReportService.getReportById(reportId));
+    }
 }

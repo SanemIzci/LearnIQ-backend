@@ -39,4 +39,12 @@ public record ErrorResponse(
     public static ErrorResponse of(int status, String error, String message, List<String> details, String path) {
         return new ErrorResponse(Instant.now(), status, error, message, details, path);
     }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("messages")
+    public List<String> messages() {
+        if (details != null && !details.isEmpty()) {
+            return details;
+        }
+        return message != null ? List.of(message) : List.of();
+    }
 }

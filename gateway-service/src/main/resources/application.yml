@@ -41,11 +41,11 @@ spring:
           filters:
             - JwtAuthenticationFilter
 
-        # ── Public exam/share endpoints (no JWT required) ─────────────────
+        # ── Public exam/share endpoints & OpenAPI docs (no JWT required) ──
         - id: exam-public
           uri: http://localhost:8082
           predicates:
-            - Path=/api/v1/public/**
+            - Path=/api/v1/public/**,/v3/api-docs/**,/api-docs/**
 
         # ── Protected exam & student endpoints (JWT required) ─────────────
         - id: exam-service

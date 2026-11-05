@@ -52,6 +52,17 @@ public class AiReportConsumer {
             reportGenerationService.generateAndSaveExamReport(event);
         } catch (Exception e) {
             log.error("Failed to generate on-demand AI exam report: {}", eventObj, e);
+            try {
+                if (eventObj instanceof Map<?, ?> m) {
+                    reportGenerationService.publishFailedEvent(
+                            (String) m.get("reportId"),
+                            (String) m.get("studentId"),
+                            (String) m.get("tenantId"),
+                            "Rapor oluşturulamadı.");
+                }
+            } catch (Exception ex) {
+                log.error("Failed to publish AI report failure event", ex);
+            }
         }
     }
 }

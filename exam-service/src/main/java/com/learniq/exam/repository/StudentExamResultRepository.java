@@ -26,5 +26,8 @@ public interface StudentExamResultRepository extends JpaRepository<StudentExamRe
 
     List<StudentExamResult> findByExamIdAndStatus(UUID examId, StudentExamResult.ResultStatus status);
 
+    org.springframework.data.domain.Page<StudentExamResult> findByExamIdAndStatus(
+            UUID examId, StudentExamResult.ResultStatus status, org.springframework.data.domain.Pageable pageable);
+
     List<StudentExamResult> findByExamIdAndStatusOrderByTotalScoreDesc(UUID examId, StudentExamResult.ResultStatus status);
 }

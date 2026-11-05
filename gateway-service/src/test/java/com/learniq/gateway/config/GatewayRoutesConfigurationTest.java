@@ -161,7 +161,8 @@ class GatewayRoutesConfigurationTest {
                 "/api/v1/students/me/home",
                 "/api/v1/subjects",
                 "/api/v1/teachers/me/classrooms/1/analytics",
-                "/api/v1/teachers/me/comparison");
+                "/api/v1/teachers/me/comparison",
+                "/v3/api-docs", "/api-docs/openapi.yaml");
         List<String> unrouted = knownPaths.stream()
                 .filter(p -> !matchesAnyPath(p))
                 .toList();

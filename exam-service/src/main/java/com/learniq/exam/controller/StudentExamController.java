@@ -88,4 +88,18 @@ public class StudentExamController {
         UUID studentId = UUID.fromString(userIdHeader);
         return ResponseEntity.ok(aiReportService.requestReport(examId, studentId));
     }
+
+    @GetMapping("/{examId}/ai-report")
+    public ResponseEntity<com.learniq.exam.dto.AiReportResponseDto> getAiReportStatus(
+            @PathVariable UUID examId,
+            @RequestHeader("X-User-Id") String userIdHeader,
+            @RequestHeader("X-User-Role") String role) {
+
+        if (!"STUDENT".equals(role)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        UUID studentId = UUID.fromString(userIdHeader);
+        return ResponseEntity.ok(aiReportService.getReportStatus(examId, studentId));
+    }
 }

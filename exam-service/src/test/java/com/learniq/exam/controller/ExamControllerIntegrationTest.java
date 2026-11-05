@@ -328,4 +328,49 @@ class ExamControllerIntegrationTest {
 
         verify(examService).listClassroomsForExam("akademi_1", EXAM_ID);
     }
+
+    @Test
+    @DisplayName("GET /api/v1/exams - Returns unpaged list when page and size are omitted")
+    void listExams_unpaged_success() throws Exception {
+        ExamResponse response = ExamResponse.builder()
+                .id(EXAM_ID)
+                .title("Genel Deneme")
+                .build();
+        when(examService.listExams()).thenReturn(List.of(response));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/exams")
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", "aaaaaaaa-0000-0000-0000-000000000001")
+                        .header("X-User-Role", "ADMIN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(EXAM_ID.toString()))
+                .andExpect(jsonPath("$[0].title").value("Genel Deneme"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/exams?page=0&size=10 - Returns PageResponse when page and size are provided")
+    void listExams_paginated_success() throws Exception {
+        ExamResponse response = ExamResponse.builder()
+                .id(EXAM_ID)
+                .title("Genel Deneme")
+                .build();
+        com.learniq.common.api.PageResponse<ExamResponse> pageResponse =
+                com.learniq.common.api.PageResponse.of(List.of(response), 1, 0, 10);
+
+        when(examService.listExams(0, 10, "examDate,desc")).thenReturn(pageResponse);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/v1/exams")
+                        .param("page", "0")
+                        .param("size", "10")
+                        .param("sort", "examDate,desc")
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", "aaaaaaaa-0000-0000-0000-000000000001")
+                        .header("X-User-Role", "ADMIN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(10))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(EXAM_ID.toString()));
+    }
 }

@@ -49,6 +49,6 @@ public class AiReport {
     private LocalDateTime completedAt;
 
     public enum ReportStatus {
-        PENDING, READY, FAILED
+        PENDING, PROCESSING, COMPLETED, FAILED, READY
     }
 }

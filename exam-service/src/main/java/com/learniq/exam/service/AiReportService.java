@@ -94,6 +94,44 @@ public class AiReportService {
         return mapToDto(newReport);
     }
 
+    @Transactional(readOnly = true)
+    public AiReportResponseDto getReportStatus(UUID examId, UUID studentId) {
+        StudentExamResult examResult = examResultRepository.findByExamIdAndStudentId(examId, studentId)
+                .orElseThrow(() -> new EntityNotFoundException("Result", studentId));
+
+        List<StudentSubjectResult> subjectResults = subjectResultRepository.findByStudentIdAndExamId(studentId, examId);
+        String dataPayload = buildDataPayload(examResult, subjectResults);
+        String dataHash = fingerprintService.generateHash(dataPayload);
+
+        AiReport report = aiReportRepository.findByStudentIdAndDataHash(studentId, dataHash)
+                .orElseThrow(() -> new EntityNotFoundException("AiReport", examId));
+
+        return mapToDto(report);
+    }
+
+    @Transactional(readOnly = true)
+    public AiReport getReportEntity(UUID reportId) {
+        return aiReportRepository.findById(reportId)
+                .orElseThrow(() -> new EntityNotFoundException("AiReport", reportId));
+    }
+
+    @Transactional(readOnly = true)
+    public AiReportResponseDto getReportById(UUID reportId) {
+        return mapToDto(getReportEntity(reportId));
+    }
+
+    public AiReportResponseDto mapToDto(AiReport report) {
+        String statusStr = report.getStatus() != null ? report.getStatus().name() : "PENDING";
+        return AiReportResponseDto.builder()
+                .id(report.getId() != null ? report.getId().toString() : null)
+                .status(statusStr)
+                .summary(report.getSummary())
+                .s3Key(report.getS3Key())
+                .requestedAt(report.getRequestedAt())
+                .completedAt(report.getCompletedAt())
+                .build();
+    }
+
     private String buildDataPayload(StudentExamResult examResult, List<StudentSubjectResult> subjectResults) {
         // Deterministic serialization of exam performance
         StringBuilder sb = new StringBuilder();
@@ -112,14 +150,5 @@ public class AiReportService {
                 sr.getNetScore()));
         }
         return sb.toString();
-    }
-
-    private AiReportResponseDto mapToDto(AiReport report) {
-        return AiReportResponseDto.builder()
-                .id(report.getId() != null ? report.getId().toString() : null)
-                .status(report.getStatus().name())
-                .summary(report.getSummary())
-                .s3Key(report.getS3Key())
-                .build();
     }
 }

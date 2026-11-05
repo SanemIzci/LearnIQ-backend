@@ -1,5 +1,6 @@
 package com.learniq.exam.exception;
 
+import com.learniq.common.api.ErrorResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -17,13 +18,13 @@ class GlobalExceptionHandlerTest {
     void handleIllegalStateException_returns409() {
         IllegalStateException ex = new IllegalStateException("Sınav kapalı durumda, sonuç girilemez");
 
-        ResponseEntity<ApiError> response = handler.handleIllegalStateException(ex);
+        ResponseEntity<ErrorResponse> response = handler.handleIllegalStateException(ex, null);
 
         assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
         assertNotNull(response.getBody());
-        assertEquals(409, response.getBody().getStatus());
-        assertEquals("State Conflict", response.getBody().getError());
-        assertEquals("Sınav kapalı durumda, sonuç girilemez", response.getBody().getMessages().get(0));
+        assertEquals(409, response.getBody().status());
+        assertEquals("State Conflict", response.getBody().error());
+        assertEquals("Sınav kapalı durumda, sonuç girilemez", response.getBody().message());
     }
 
     @Test
@@ -31,12 +32,12 @@ class GlobalExceptionHandlerTest {
     void handleIllegalArgumentException_returns400() {
         IllegalArgumentException ex = new IllegalArgumentException("Toplam soru sayısı aşıldı");
 
-        ResponseEntity<ApiError> response = handler.handleIllegalArgumentException(ex);
+        ResponseEntity<ErrorResponse> response = handler.handleIllegalArgumentException(ex, null);
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertNotNull(response.getBody());
-        assertEquals(400, response.getBody().getStatus());
-        assertEquals("Bad Request", response.getBody().getError());
-        assertEquals("Toplam soru sayısı aşıldı", response.getBody().getMessages().get(0));
+        assertEquals(400, response.getBody().status());
+        assertEquals("Bad Request", response.getBody().error());
+        assertEquals("Toplam soru sayısı aşıldı", response.getBody().message());
     }
 }
