@@ -26,10 +26,11 @@ public interface ExamRepository extends JpaRepository<Exam, UUID> {
     Optional<Exam> findByIdWithSubjects(UUID id);
 
     @Query(value = """
-        SELECT e.* FROM exams e
+        SELECT DISTINCT e.* FROM exams e
         JOIN exam_classrooms ec ON e.id = ec.exam_id
         JOIN classroom_students cs ON ec.classroom_id = cs.classroom_id
-        WHERE cs.student_id = :studentId AND e.status = :status
+        WHERE cs.student_id = :studentId
+          AND (:status IS NULL OR e.status = :status)
         ORDER BY e.exam_date DESC
     """, nativeQuery = true)
     List<Exam> findExamsForStudent(@org.springframework.data.repository.query.Param("studentId") UUID studentId,

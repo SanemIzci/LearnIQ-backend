@@ -1,5 +1,7 @@
 package com.learniq.exam.service;
 
+import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import com.learniq.exam.domain.Exam;
 import com.learniq.exam.domain.Subject;
 import com.learniq.exam.dto.ExamCreateRequest;
@@ -11,10 +13,14 @@ import com.learniq.exam.repository.ExamRepository;
 import com.learniq.exam.repository.SubjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +34,7 @@ public class ExamService {
     private final ExamRepository examRepository;
     private final SubjectRepository subjectRepository;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final JdbcTemplate jdbcTemplate;
 
     // ── Endpoint #1: Create Exam ───────────────────────────────────────────────
 
@@ -147,6 +154,111 @@ public class ExamService {
         return toResponse(updated);
     }
 
+    // ── Classroom assignments ────────────────────────────────────────────────
+
+    private String resolveSchema(String tenantId) {
+        if (tenantId != null && !tenantId.isBlank()) {
+            return TenantSchemaValidator.requireValid(tenantId);
+        }
+        return TenantSchemaValidator.requireValid(TenantContext.getCurrentTenant());
+    }
+
+    @Transactional
+    public ExamResponse assignClassroom(String tenantId, UUID examId, UUID classroomId) {
+        String schema = resolveSchema(tenantId);
+
+        // 1. Sınavın kiracıda var olduğunu doğrula
+        Exam exam = examRepository.findByIdWithSubjects(examId)
+                .orElseThrow(() -> new EntityNotFoundException("Exam", examId));
+
+        // 2. Sınıfın aynı kiracıda var olduğunu doğrula
+        List<Integer> classroomRows = jdbcTemplate.queryForList(
+                "SELECT 1 FROM %s.classrooms WHERE id = ?".formatted(schema),
+                Integer.class, classroomId);
+        if (classroomRows.isEmpty()) {
+            throw new EntityNotFoundException("Classroom", classroomId);
+        }
+
+        // 3. Duplicate assignment engelle (409 Conflict)
+        if (exam.getClassroomIds() != null && exam.getClassroomIds().contains(classroomId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Exam is already assigned to this classroom");
+        }
+
+        List<Integer> existing = jdbcTemplate.queryForList(
+                "SELECT 1 FROM %s.exam_classrooms WHERE exam_id = ? AND classroom_id = ?".formatted(schema),
+                Integer.class, examId, classroomId);
+        if (!existing.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Exam is already assigned to this classroom");
+        }
+
+        // 4. İlişkiyi kaydet
+        if (exam.getClassroomIds() != null) {
+            exam.getClassroomIds().add(classroomId);
+        }
+        Exam updated = examRepository.save(exam);
+
+        log.info("Assigned exam {} to classroom {} in tenant {}", examId, classroomId, tenantId);
+        return toResponse(updated);
+    }
+
+    @Transactional
+    public ExamResponse unassignClassroom(String tenantId, UUID examId, UUID classroomId) {
+        String schema = resolveSchema(tenantId);
+
+        // 1. Sınavın kiracıda var olduğunu doğrula
+        Exam exam = examRepository.findByIdWithSubjects(examId)
+                .orElseThrow(() -> new EntityNotFoundException("Exam", examId));
+
+        // 2. Sınıfın aynı kiracıda var olduğunu doğrula
+        List<Integer> classroomRows = jdbcTemplate.queryForList(
+                "SELECT 1 FROM %s.classrooms WHERE id = ?".formatted(schema),
+                Integer.class, classroomId);
+        if (classroomRows.isEmpty()) {
+            throw new EntityNotFoundException("Classroom", classroomId);
+        }
+
+        // 3. Eşleşmenin var olduğunu doğrula (yoksa 404)
+        boolean inSet = exam.getClassroomIds() != null && exam.getClassroomIds().contains(classroomId);
+        List<Integer> existing = jdbcTemplate.queryForList(
+                "SELECT 1 FROM %s.exam_classrooms WHERE exam_id = ? AND classroom_id = ?".formatted(schema),
+                Integer.class, examId, classroomId);
+
+        if (!inSet && existing.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Exam is not assigned to this classroom");
+        }
+
+        // 4. İlişkiyi kaldır (öğrencinin geçmiş sınav sonuçları student_exam_results korunur)
+        if (exam.getClassroomIds() != null) {
+            exam.getClassroomIds().remove(classroomId);
+        }
+        Exam updated = examRepository.save(exam);
+
+        log.info("Unassigned exam {} from classroom {} in tenant {}", examId, classroomId, tenantId);
+        return toResponse(updated);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> listClassroomsForExam(String tenantId, UUID examId) {
+        String schema = resolveSchema(tenantId);
+
+        if (!examRepository.existsById(examId)) {
+            throw new EntityNotFoundException("Exam", examId);
+        }
+
+        return jdbcTemplate.queryForList(
+                """
+                SELECT c.id, c.name
+                FROM %1$s.classrooms c
+                JOIN %1$s.exam_classrooms ec ON ec.classroom_id = c.id
+                WHERE ec.exam_id = ?
+                ORDER BY c.name
+                """.formatted(schema),
+                examId);
+    }
+
     // ── Mapping helper ─────────────────────────────────────────────────────────
 
     private ExamResponse toResponse(Exam exam) {
@@ -159,12 +271,17 @@ public class ExamService {
                 .sorted((a, b) -> a.getName().compareToIgnoreCase(b.getName()))
                 .toList();
 
+        List<UUID> classroomIdList = exam.getClassroomIds() != null
+                ? exam.getClassroomIds().stream().sorted().toList()
+                : List.of();
+
         return ExamResponse.builder()
                 .id(exam.getId())
                 .title(exam.getTitle())
                 .examDate(exam.getExamDate())
                 .examType(exam.getExamType())
                 .subjects(subjectResponses)
+                .classroomIds(classroomIdList)
                 .createdAt(exam.getCreatedAt())
                 .build();
     }

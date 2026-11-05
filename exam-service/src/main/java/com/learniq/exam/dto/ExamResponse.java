@@ -20,5 +20,7 @@ public class ExamResponse {
     private LocalDate examDate;
     private String examType;
     private List<SubjectResponse> subjects;
+    @Builder.Default
+    private List<UUID> classroomIds = new java.util.ArrayList<>();
     private LocalDateTime createdAt;
 }

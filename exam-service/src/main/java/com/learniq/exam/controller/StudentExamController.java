@@ -27,16 +27,21 @@ public class StudentExamController {
 
     @GetMapping
     public ResponseEntity<List<Exam>> getMyExams(
+            @RequestParam(value = "status", required = false) String status,
             @RequestHeader("X-User-Id") String userId,
             @RequestHeader("X-User-Role") String role) {
 
         if (!"STUDENT".equals(role)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
-        
+
+        String filterStatus = (status != null && !status.isBlank())
+                ? (status.equalsIgnoreCase("ALL") ? null : status.toUpperCase())
+                : Exam.ExamStatus.OPEN.name();
+
         List<Exam> exams = examRepository.findExamsForStudent(
-                UUID.fromString(userId), Exam.ExamStatus.OPEN.name());
-        
+                UUID.fromString(userId), filterStatus);
+
         return ResponseEntity.ok(exams);
     }
 

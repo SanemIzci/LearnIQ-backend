@@ -197,4 +197,135 @@ class ExamControllerIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400));
     }
+
+    // ── Exam - Classroom Assignment Endpoints ────────────────────────────────
+
+    private static final UUID CLASSROOM_ID = UUID.fromString("dddddddd-0000-0000-0000-000000000001");
+
+    @Test
+    @DisplayName("POST /api/v1/exams/{examId}/classrooms/{classroomId} - ADMIN role returns 200 OK")
+    void assignClassroom_pathVariable_admin_success() throws Exception {
+        ExamResponse response = ExamResponse.builder()
+                .id(EXAM_ID)
+                .title("Haziran TYT Denemesi")
+                .classroomIds(List.of(CLASSROOM_ID))
+                .build();
+        when(examService.assignClassroom(eq("akademi_1"), eq(EXAM_ID), eq(CLASSROOM_ID)))
+                .thenReturn(response);
+
+        mockMvc.perform(post("/api/v1/exams/{examId}/classrooms/{classroomId}", EXAM_ID, CLASSROOM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", "aaaaaaaa-0000-0000-0000-000000000001")
+                        .header("X-User-Role", "ADMIN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(EXAM_ID.toString()))
+                .andExpect(jsonPath("$.classroomIds[0]").value(CLASSROOM_ID.toString()));
+
+        verify(examService).assignClassroom("akademi_1", EXAM_ID, CLASSROOM_ID);
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/exams/{examId}/classrooms - Body ile atama ADMIN role returns 200 OK")
+    void assignClassroom_body_admin_success() throws Exception {
+        ExamResponse response = ExamResponse.builder()
+                .id(EXAM_ID)
+                .title("Haziran TYT Denemesi")
+                .classroomIds(List.of(CLASSROOM_ID))
+                .build();
+        when(examService.assignClassroom(eq("akademi_1"), eq(EXAM_ID), eq(CLASSROOM_ID)))
+                .thenReturn(response);
+
+        com.learniq.exam.dto.AssignClassroomRequest req = new com.learniq.exam.dto.AssignClassroomRequest(CLASSROOM_ID);
+
+        mockMvc.perform(post("/api/v1/exams/{examId}/classrooms", EXAM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", "aaaaaaaa-0000-0000-0000-000000000001")
+                        .header("X-User-Role", "ADMIN")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.classroomIds[0]").value(CLASSROOM_ID.toString()));
+
+        verify(examService).assignClassroom("akademi_1", EXAM_ID, CLASSROOM_ID);
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/exams/{examId}/classrooms/{classroomId} - STUDENT role returns 403 Forbidden")
+    void assignClassroom_studentRole_forbidden() throws Exception {
+        mockMvc.perform(post("/api/v1/exams/{examId}/classrooms/{classroomId}", EXAM_ID, CLASSROOM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", STUDENT_ID.toString())
+                        .header("X-User-Role", "STUDENT"))
+                .andExpect(status().isForbidden());
+
+        verify(examService, never()).assignClassroom(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/exams/{examId}/classrooms/{classroomId} - TEACHER yetkisiz sınıfa atama yaparsa 403 Forbidden")
+    void assignClassroom_teacherUnauthorized_forbidden() throws Exception {
+        UUID teacherId = UUID.fromString("eeeeeeee-0000-0000-0000-000000000001");
+        doThrow(new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN, "You do not have access to this classroom"))
+                .when(accessControlService)
+                .validateClassroomAccess(eq("akademi_1"), eq(teacherId), eq("TEACHER"), eq(CLASSROOM_ID));
+
+        mockMvc.perform(post("/api/v1/exams/{examId}/classrooms/{classroomId}", EXAM_ID, CLASSROOM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", teacherId.toString())
+                        .header("X-User-Role", "TEACHER"))
+                .andExpect(status().isForbidden());
+
+        verify(examService, never()).assignClassroom(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/exams/{examId}/classrooms/{classroomId} - ADMIN role returns 200 OK")
+    void unassignClassroom_admin_success() throws Exception {
+        ExamResponse response = ExamResponse.builder()
+                .id(EXAM_ID)
+                .title("Haziran TYT Denemesi")
+                .classroomIds(List.of())
+                .build();
+        when(examService.unassignClassroom(eq("akademi_1"), eq(EXAM_ID), eq(CLASSROOM_ID)))
+                .thenReturn(response);
+
+        mockMvc.perform(delete("/api/v1/exams/{examId}/classrooms/{classroomId}", EXAM_ID, CLASSROOM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", "aaaaaaaa-0000-0000-0000-000000000001")
+                        .header("X-User-Role", "ADMIN"))
+                .andExpect(status().isOk());
+
+        verify(examService).unassignClassroom("akademi_1", EXAM_ID, CLASSROOM_ID);
+    }
+
+    @Test
+    @DisplayName("DELETE /api/v1/exams/{examId}/classrooms/{classroomId} - STUDENT role returns 403 Forbidden")
+    void unassignClassroom_student_forbidden() throws Exception {
+        mockMvc.perform(delete("/api/v1/exams/{examId}/classrooms/{classroomId}", EXAM_ID, CLASSROOM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", STUDENT_ID.toString())
+                        .header("X-User-Role", "STUDENT"))
+                .andExpect(status().isForbidden());
+
+        verify(examService, never()).unassignClassroom(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/exams/{examId}/classrooms - ADMIN role returns 200 OK with classroom list")
+    void listClassroomsForExam_admin_success() throws Exception {
+        when(examService.listClassroomsForExam(eq("akademi_1"), eq(EXAM_ID)))
+                .thenReturn(List.of(java.util.Map.of("id", CLASSROOM_ID.toString(), "name", "12-A")));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/v1/exams/{examId}/classrooms", EXAM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", "aaaaaaaa-0000-0000-0000-000000000001")
+                        .header("X-User-Role", "ADMIN"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(CLASSROOM_ID.toString()))
+                .andExpect(jsonPath("$[0].name").value("12-A"));
+
+        verify(examService).listClassroomsForExam("akademi_1", EXAM_ID);
+    }
 }

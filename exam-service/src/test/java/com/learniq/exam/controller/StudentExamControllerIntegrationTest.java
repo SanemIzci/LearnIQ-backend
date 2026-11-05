@@ -18,7 +18,8 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -120,5 +121,45 @@ class StudentExamControllerIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PENDING"));
+    }
+
+    // ── Student Exam Discovery Tests ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("GET /api/v1/students/me/exams - STUDENT role returns assigned exams (200 OK)")
+    void getMyExams_studentRole_returnsAssignedExams() throws Exception {
+        UUID studentId = UUID.randomUUID();
+        UUID examId = UUID.randomUUID();
+
+        com.learniq.exam.domain.Exam exam = com.learniq.exam.domain.Exam.builder()
+                .id(examId)
+                .title("Matematik Deneme 1")
+                .examDate(java.time.LocalDate.of(2025, 6, 10))
+                .examType("TYT")
+                .status(com.learniq.exam.domain.Exam.ExamStatus.OPEN)
+                .build();
+
+        when(examRepository.findExamsForStudent(eq(studentId), eq("OPEN")))
+                .thenReturn(List.of(exam));
+
+        mockMvc.perform(get("/api/v1/students/me/exams")
+                        .header("X-User-Id", studentId.toString())
+                        .header("X-User-Role", "STUDENT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(examId.toString()))
+                .andExpect(jsonPath("$[0].title").value("Matematik Deneme 1"));
+
+        verify(examRepository).findExamsForStudent(studentId, "OPEN");
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/students/me/exams - Non-student role returns 403 Forbidden")
+    void getMyExams_nonStudentRole_forbidden() throws Exception {
+        mockMvc.perform(get("/api/v1/students/me/exams")
+                        .header("X-User-Id", UUID.randomUUID().toString())
+                        .header("X-User-Role", "TEACHER"))
+                .andExpect(status().isForbidden());
+
+        verify(examRepository, never()).findExamsForStudent(any(), any());
     }
 }

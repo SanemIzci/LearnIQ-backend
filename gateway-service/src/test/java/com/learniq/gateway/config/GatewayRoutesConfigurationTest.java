@@ -168,4 +168,25 @@ class GatewayRoutesConfigurationTest {
         assertTrue(unrouted.isEmpty(),
                 "Bu endpoint'ler gateway'de hiçbir route ile eşleşmiyor (404 döner): " + unrouted);
     }
+
+    @Test
+    @DisplayName("Gateway global CORS konfigürasyonu PATCH metodunu destekler")
+    @SuppressWarnings("unchecked")
+    void corsConfigurationIncludesPatch() {
+        try (InputStream in = GatewayRoutesConfigurationTest.class.getResourceAsStream("/application.yml")) {
+            Map<String, Object> root = (Map<String, Object>) new Yaml().load(in);
+            Map<String, Object> spring = (Map<String, Object>) root.get("spring");
+            Map<String, Object> cloud = (Map<String, Object>) spring.get("cloud");
+            Map<String, Object> gateway = (Map<String, Object>) cloud.get("gateway");
+            Map<String, Object> globalcors = (Map<String, Object>) gateway.get("globalcors");
+            Map<String, Object> corsConfigurations = (Map<String, Object>) globalcors.get("corsConfigurations");
+            Map<String, Object> defaultCors = (Map<String, Object>) corsConfigurations.get("[/**]");
+            List<String> allowedMethods = (List<String>) defaultCors.get("allowedMethods");
+
+            assertNotNull(allowedMethods, "allowedMethods tanımlı olmalı");
+            assertTrue(allowedMethods.contains("PATCH"), "allowedMethods PATCH içermeli");
+        } catch (Exception e) {
+            throw new IllegalStateException("CORS konfigürasyonu doğrulanamadı", e);
+        }
+    }
 }

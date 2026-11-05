@@ -1,5 +1,6 @@
 package com.learniq.exam.controller;
 
+import com.learniq.exam.dto.AssignClassroomRequest;
 import com.learniq.exam.dto.ExamCreateRequest;
 import com.learniq.exam.dto.ExamResponse;
 import com.learniq.exam.dto.ExamUpdateRequest;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -44,6 +46,13 @@ public class ExamController {
     private void validateExamModify(String tenantId, String role, String userId, UUID examId) {
         requireStaffRole(role);
         accessControlService.validateExamAccess(tenantId, UUID.fromString(userId), role, examId);
+    }
+
+    private void validateExamClassroomAccess(String tenantId, String role, String userId, UUID examId, UUID classroomId) {
+        requireStaffRole(role);
+        UUID requesterId = UUID.fromString(userId);
+        accessControlService.validateExamAccess(tenantId, requesterId, role, examId);
+        accessControlService.validateClassroomAccess(tenantId, requesterId, role, classroomId);
     }
 
     // ── Endpoint #1: Create Exam ───────────────────────────────────────────────
@@ -148,6 +157,73 @@ public class ExamController {
                                                       @RequestHeader("X-User-Role") String role) {
         validateExamModify(tenantId, role, userId, examId);
         return ResponseEntity.ok(examService.removeSubjectFromExam(examId, subjectId));
+    }
+
+    // ── Endpoint: Assign Classroom to Exam ───────────────────────────────────
+
+    /**
+     * POST /api/v1/exams/{examId}/classrooms/{classroomId}
+     * Assigns an exam to a classroom.
+     * Guard: ADMIN / SUPER_ADMIN or assigned TEACHER.
+     */
+    @PostMapping("/{examId}/classrooms/{classroomId}")
+    public ResponseEntity<ExamResponse> assignClassroom(
+            @PathVariable UUID examId,
+            @PathVariable UUID classroomId,
+            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader("X-User-Role") String role) {
+        validateExamClassroomAccess(tenantId, role, userId, examId, classroomId);
+        return ResponseEntity.ok(examService.assignClassroom(tenantId, examId, classroomId));
+    }
+
+    /**
+     * POST /api/v1/exams/{examId}/classrooms
+     * Alternative assignment endpoint with JSON request body.
+     */
+    @PostMapping(value = "/{examId}/classrooms", consumes = org.springframework.http.MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ExamResponse> assignClassroomWithBody(
+            @PathVariable UUID examId,
+            @Valid @RequestBody AssignClassroomRequest request,
+            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader("X-User-Role") String role) {
+        validateExamClassroomAccess(tenantId, role, userId, examId, request.getClassroomId());
+        return ResponseEntity.ok(examService.assignClassroom(tenantId, examId, request.getClassroomId()));
+    }
+
+    // ── Endpoint: Unassign Classroom from Exam ───────────────────────────────
+
+    /**
+     * DELETE /api/v1/exams/{examId}/classrooms/{classroomId}
+     * Removes classroom assignment from an exam.
+     * Historical student results are preserved.
+     */
+    @DeleteMapping("/{examId}/classrooms/{classroomId}")
+    public ResponseEntity<ExamResponse> unassignClassroom(
+            @PathVariable UUID examId,
+            @PathVariable UUID classroomId,
+            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader("X-User-Role") String role) {
+        validateExamClassroomAccess(tenantId, role, userId, examId, classroomId);
+        return ResponseEntity.ok(examService.unassignClassroom(tenantId, examId, classroomId));
+    }
+
+    // ── Endpoint: List Classrooms for Exam ───────────────────────────────────
+
+    /**
+     * GET /api/v1/exams/{examId}/classrooms
+     * Returns all classrooms assigned to an exam.
+     */
+    @GetMapping("/{examId}/classrooms")
+    public ResponseEntity<List<Map<String, Object>>> listClassrooms(
+            @PathVariable UUID examId,
+            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader("X-User-Role") String role) {
+        validateExamModify(tenantId, role, userId, examId);
+        return ResponseEntity.ok(examService.listClassroomsForExam(tenantId, examId));
     }
 
     // ── Endpoint #10: Finalize Exam ───────────────────────────────────────────
