@@ -34,6 +34,11 @@ public class SecurityConfig {
             .formLogin(AbstractHttpConfigurer::disable)
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/v1/auth/**").permitAll()
+                // Platform (SUPER_ADMIN) login works without an existing Bearer token.
+                // Platform identity stays separate from tenant authorization: SUPER_ADMIN
+                // JWTs carry no tenantId claim and tenant endpoints still demand a tenant
+                // header that the gateway strips for SUPER_ADMIN.
+                .requestMatchers("/api/v1/platform/auth/login").permitAll()
                 .anyRequest().authenticated()
             )
             .exceptionHandling(ex -> ex.authenticationEntryPoint(

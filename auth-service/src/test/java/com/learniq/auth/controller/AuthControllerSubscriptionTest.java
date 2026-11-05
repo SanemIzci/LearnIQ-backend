@@ -78,6 +78,7 @@ class AuthControllerSubscriptionTest {
 
         mockMvc.perform(post("/api/v1/auth/register")
                         .header("X-User-Role", "ADMIN")
+                        .header("X-Tenant-Id", "akademi_1")
                         .contentType(APPLICATION_JSON)
                         .content("""
                                 {"username":"yeni","password":"Pw123456","email":"y@x.io",
@@ -86,6 +87,75 @@ class AuthControllerSubscriptionTest {
                 .andExpect(status().isForbidden());
 
         verify(userService, never()).registerUser(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("register - body tenantId differs from X-Tenant-Id header → 400 Bad Request (cross-tenant rejected)")
+    void register_crossTenantMismatch_badRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .header("X-User-Role", "ADMIN")
+                        .header("X-Tenant-Id", "akademi_1")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"username":"attacker","password":"Pw123456","email":"a@x.io",
+                                 "fullName":"Attacker","role":"STUDENT","tenantId":"akademi_victim"}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        verify(userService, never()).registerUser(anyString(), any());
+        verify(tenantSubscriptionService, never()).requireActiveTenant(anyString());
+    }
+
+    @Test
+    @DisplayName("register - missing X-Tenant-Id header → 400 Bad Request")
+    void register_missingTenantHeader_badRequest() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .header("X-User-Role", "ADMIN")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"username":"yeni","password":"Pw123456","email":"y@x.io",
+                                 "fullName":"Yeni","role":"STUDENT","tenantId":"akademi_1"}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        verify(userService, never()).registerUser(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("register - non-ADMIN role → 403 Forbidden")
+    void register_nonAdminRole_forbidden() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .header("X-User-Role", "TEACHER")
+                        .header("X-Tenant-Id", "akademi_1")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"username":"yeni","password":"Pw123456","email":"y@x.io",
+                                 "fullName":"Yeni","role":"STUDENT","tenantId":"akademi_1"}
+                                """))
+                .andExpect(status().isForbidden());
+
+        verify(userService, never()).registerUser(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("register - matching tenantId and active tenant → 201 Created under authenticated tenant")
+    void register_validAdmin_createsUser() throws Exception {
+        doNothing().when(tenantSubscriptionService).requireActiveTenant("akademi_1");
+        UUID createdId = UUID.randomUUID();
+        when(userService.registerUser(eq("akademi_1"), any())).thenReturn(createdId);
+
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .header("X-User-Role", "ADMIN")
+                        .header("X-Tenant-Id", "akademi_1")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"username":"valid","password":"Pw123456","email":"v@x.io",
+                                 "fullName":"Valid","role":"STUDENT","tenantId":"akademi_1"}
+                                """))
+                .andExpect(status().isCreated());
+
+        verify(tenantSubscriptionService).requireActiveTenant("akademi_1");
+        verify(userService).registerUser(eq("akademi_1"), any());
     }
 
     private static String json(String username, String password, String tenantId) {

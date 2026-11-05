@@ -57,10 +57,11 @@ public class PlatformAuthController {
 
         // Short-lived access token (15 min), no tenantId
         String accessToken  = jwtService.generateSuperAdminToken(userId, username);
-        // No refresh token stored in DB — SUPER_ADMIN sessions are short by design
-        String refreshToken = jwtService.generateRefreshToken(userId, "platform");
-
+        // No refresh token is persisted for platform users and BOOTSTRAP does not
+        // create tenant refresh tokens; returning a token here would imply a
+        // refresh flow that does not exist. SUPER_ADMIN sessions are short by design
+        // and re-login is the documented renewal path.
         log.info("SUPER_ADMIN '{}' logged in successfully", username);
-        return ResponseEntity.ok(new AuthResponse(accessToken, refreshToken, role, userId.toString(), username));
+        return ResponseEntity.ok(new AuthResponse(accessToken, null, role, userId.toString(), username));
     }
 }

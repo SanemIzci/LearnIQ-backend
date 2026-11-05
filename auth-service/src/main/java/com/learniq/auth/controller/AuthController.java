@@ -53,20 +53,36 @@ public class AuthController {
     }
 
     // -------------------------------------------------------
-    // POST /api/v1/auth/register  (ADMIN only — validated via X-User-Role header from gateway)
+    // POST /api/v1/auth/register  (ADMIN only — validated via X-User-Role header)
     // -------------------------------------------------------
+    /**
+     * Tenant is taken from the authenticated identity (X-Tenant-Id injected by the
+     * gateway from the validated JWT), never from the request body. If the body
+     * carries a tenantId that conflicts with the authenticated tenant, the call
+     * is rejected to avoid silent cross-tenant user creation.
+     */
     @PostMapping("/register")
     public ResponseEntity<Map<String, String>> register(
             @RequestBody RegisterRequest request,
-            @RequestHeader(value = "X-User-Role", required = false) String callerRole) {
+            @RequestHeader(value = "X-User-Role", required = false) String callerRole,
+            @RequestHeader(value = "X-Tenant-Id", required = false) String tenantId) {
 
         if (!"ADMIN".equals(callerRole)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(Map.of("error", "Only ADMIN can register new users"));
         }
-        tenantSubscriptionService.requireActiveTenant(request.getTenantId());
+        if (tenantId == null || tenantId.isBlank()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "X-Tenant-Id is required"));
+        }
+        if (request.getTenantId() != null && !tenantId.equals(request.getTenantId())) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "tenantId in request body does not match the authenticated tenant"));
+        }
 
-        UUID newUserId = userService.registerUser(request.getTenantId(), request);
+        tenantSubscriptionService.requireActiveTenant(tenantId);
+
+        UUID newUserId = userService.registerUser(tenantId, request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(Map.of("userId", newUserId.toString(), "message", "User created successfully"));
     }
