@@ -250,4 +250,42 @@ public class ExamResultServiceTest {
         assertThatThrownBy(() -> examResultService.submitResult(examId, studentId, new ExamResultSubmitRequest()))
                 .isInstanceOf(EntityNotFoundException.class);
     }
+
+    @Test
+    void approveResult_examFinalized_throwsIllegalStateException() {
+        Exam finalizedExam = Exam.builder().id(examId).examType("TYT").status(Exam.ExamStatus.FINALIZED).build();
+        UUID resultId = UUID.randomUUID();
+        StudentExamResult result = StudentExamResult.builder()
+                .id(resultId)
+                .exam(finalizedExam)
+                .status(StudentExamResult.ResultStatus.SUBMITTED)
+                .build();
+
+        when(studentExamResultRepository.findById(resultId)).thenReturn(Optional.of(result));
+
+        assertThatThrownBy(() -> examResultService.approveResult(examId, resultId, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("onaylanamaz");
+
+        verify(studentExamResultRepository, never()).save(any(StudentExamResult.class));
+    }
+
+    @Test
+    void rejectResult_examFinalized_throwsIllegalStateException() {
+        Exam finalizedExam = Exam.builder().id(examId).examType("TYT").status(Exam.ExamStatus.FINALIZED).build();
+        UUID resultId = UUID.randomUUID();
+        StudentExamResult result = StudentExamResult.builder()
+                .id(resultId)
+                .exam(finalizedExam)
+                .status(StudentExamResult.ResultStatus.SUBMITTED)
+                .build();
+
+        when(studentExamResultRepository.findById(resultId)).thenReturn(Optional.of(result));
+
+        assertThatThrownBy(() -> examResultService.rejectResult(examId, resultId, UUID.randomUUID(), "Sebep"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("reddedilemez");
+
+        verify(studentExamResultRepository, never()).save(any(StudentExamResult.class));
+    }
 }

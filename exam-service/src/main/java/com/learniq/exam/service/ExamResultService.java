@@ -92,6 +92,10 @@ public class ExamResultService {
             throw new IllegalArgumentException("Sonuç bu sınava ait değil.");
         }
 
+        if (result.getExam().getStatus() == Exam.ExamStatus.FINALIZED) {
+            throw new IllegalStateException("Sonlandırılmış bir sınavın sonuçları onaylanamaz.");
+        }
+
         result.setStatus(StudentExamResult.ResultStatus.APPROVED);
         result.setReviewedBy(teacherId);
         result.setReviewedAt(LocalDateTime.now());
@@ -106,6 +110,10 @@ public class ExamResultService {
 
         if (!result.getExam().getId().equals(examId)) {
             throw new IllegalArgumentException("Sonuç bu sınava ait değil.");
+        }
+
+        if (result.getExam().getStatus() == Exam.ExamStatus.FINALIZED) {
+            throw new IllegalStateException("Sonlandırılmış bir sınavın sonuçları reddedilemez.");
         }
 
         result.setStatus(StudentExamResult.ResultStatus.REJECTED);
