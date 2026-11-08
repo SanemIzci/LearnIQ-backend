@@ -3,6 +3,8 @@ package com.learniq.exam.messaging;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import com.learniq.exam.domain.AiReport;
 import com.learniq.exam.repository.AiReportRepository;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +48,15 @@ public class AiReportCompletedConsumer {
                 log.warn("Eksik veri: reportId={}, s3Key={}", reportIdStr, s3Key);
                 return;
             }
+
+            // Kafka listener thread'lerinde TenantInterceptor çalışmaz; tenant event'ten bağlanmazsa
+            // Hibernate "public" şemasına düşer ve ai_reports bulunamaz (rapor PENDING'de kalır).
+            String tenantId = (String) event.get("tenantId");
+            if (!TenantSchemaValidator.isValid(tenantId)) {
+                log.warn("Geçersiz/eksik tenantId, event atlandı: reportId={}, tenantId={}", reportIdStr, tenantId);
+                return;
+            }
+            TenantContext.setCurrentTenant(tenantId);
 
             Optional<AiReport> reportOpt = aiReportRepository.findById(reportId);
             if (reportOpt.isEmpty()) {
@@ -91,6 +102,8 @@ public class AiReportCompletedConsumer {
             log.error("Event parse edilemedi: {}", message, e);
         } catch (Exception e) {
             log.error("Rapor tamamlanırken beklenmeyen hata oluştu", e);
+        } finally {
+            TenantContext.clear();
         }
     }
 }

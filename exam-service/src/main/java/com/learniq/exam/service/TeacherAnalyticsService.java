@@ -286,10 +286,10 @@ public class TeacherAnalyticsService {
             Map<String, Object> examStats = jdbcTemplate.queryForMap(
                     """
                     SELECT count(ser.id) as part_count, AVG(ser.total_score) as avg_score
-                    FROM student_exam_results ser
-                    JOIN classroom_students cs ON cs.student_id = ser.student_id
+                    FROM %s.student_exam_results ser
+                    JOIN %s.classroom_students cs ON cs.student_id = ser.student_id
                     WHERE cs.classroom_id = ? AND ser.exam_id = ? AND ser.status = 'APPROVED'
-                    """,
+                    """.formatted(schema, schema),
                     cid, examId);
 
             Number partCountNum = (Number) examStats.get("part_count");
@@ -306,14 +306,14 @@ public class TeacherAnalyticsService {
                            AVG(ssr.correct_count) as avg_correct,
                            AVG(ssr.wrong_count) as avg_wrong,
                            AVG(ssr.net_score) as avg_net
-                    FROM student_subject_results ssr
-                    JOIN subjects s ON s.id = ssr.subject_id
-                    JOIN classroom_students cs ON cs.student_id = ssr.student_id
-                    JOIN student_exam_results ser ON ser.student_id = ssr.student_id AND ser.exam_id = ssr.exam_id
+                    FROM %s.student_subject_results ssr
+                    JOIN %s.subjects s ON s.id = ssr.subject_id
+                    JOIN %s.classroom_students cs ON cs.student_id = ssr.student_id
+                    JOIN %s.student_exam_results ser ON ser.student_id = ssr.student_id AND ser.exam_id = ssr.exam_id
                     WHERE cs.classroom_id = ? AND ssr.exam_id = ? AND ser.status = 'APPROVED'
                     GROUP BY s.id, s.name
                     ORDER BY s.name
-                    """,
+                    """.formatted(schema, schema, schema, schema),
                     (rs, rowNum) -> ClassSubjectAverageDto.builder()
                             .subjectId(UUID.fromString(rs.getString("subject_id")))
                             .subjectName(rs.getString("subject_name"))

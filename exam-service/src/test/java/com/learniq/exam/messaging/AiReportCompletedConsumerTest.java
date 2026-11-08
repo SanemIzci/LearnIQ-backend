@@ -38,7 +38,7 @@ class AiReportCompletedConsumerTest {
         String summary = "Sen çok zekisin";
 
         String jsonMessage = String.format(
-            "{\"reportId\":\"%s\",\"s3Key\":\"%s\",\"summary\":\"%s\"}",
+            "{\"reportId\":\"%s\",\"tenantId\":\"tenant_demo\",\"s3Key\":\"%s\",\"summary\":\"%s\"}",
             reportId, s3Key, summary
         );
 
@@ -73,7 +73,7 @@ class AiReportCompletedConsumerTest {
     void consume_reportNotFound_handlesGracefully() {
         UUID reportId = UUID.randomUUID();
         String jsonMessage = String.format(
-            "{\"reportId\":\"%s\",\"s3Key\":\"test\"}", reportId
+            "{\"reportId\":\"%s\",\"tenantId\":\"tenant_demo\",\"s3Key\":\"test\"}", reportId
         );
 
         when(aiReportRepository.findById(reportId)).thenReturn(Optional.empty());
@@ -87,7 +87,7 @@ class AiReportCompletedConsumerTest {
     @DisplayName("consume - Eksik s3Key içeren mesaj atlanır (DB'ye hiç gidilmez)")
     void consume_missingS3Key_skips() {
         UUID reportId = UUID.randomUUID();
-        String jsonMessage = String.format("{\"reportId\":\"%s\",\"summary\":\"x\"}", reportId);
+        String jsonMessage = String.format("{\"reportId\":\"%s\",\"tenantId\":\"tenant_demo\",\"summary\":\"x\"}", reportId);
 
         consumer.consume(jsonMessage);
 
@@ -98,7 +98,7 @@ class AiReportCompletedConsumerTest {
     @Test
     @DisplayName("consume - Geçersiz (UUID olmayan) reportId hata fırlatmaz, kaydetmez")
     void consume_invalidReportId_handlesGracefully() {
-        String jsonMessage = "{\"reportId\":\"not-a-uuid\",\"s3Key\":\"reports/x.md\"}";
+        String jsonMessage = "{\"reportId\":\"not-a-uuid\",\"tenantId\":\"tenant_demo\",\"s3Key\":\"reports/x.md\"}";
 
         consumer.consume(jsonMessage);
 
@@ -110,7 +110,7 @@ class AiReportCompletedConsumerTest {
     void consume_duplicateDelivery_isIdempotent() {
         UUID reportId = UUID.randomUUID();
         String jsonMessage = String.format(
-                "{\"reportId\":\"%s\",\"s3Key\":\"reports/x.md\",\"summary\":\"ok\"}", reportId);
+                "{\"reportId\":\"%s\",\"tenantId\":\"tenant_demo\",\"s3Key\":\"reports/x.md\",\"summary\":\"ok\"}", reportId);
 
         AiReport report = new AiReport();
         report.setId(reportId);
@@ -130,7 +130,7 @@ class AiReportCompletedConsumerTest {
     void consume_failedStatus_updatesReportToFailed() {
         UUID reportId = UUID.randomUUID();
         String jsonMessage = String.format(
-                "{\"reportId\":\"%s\",\"status\":\"FAILED\",\"error\":\"Rapor oluşturulurken bir hata oluştu.\"}", reportId);
+                "{\"reportId\":\"%s\",\"tenantId\":\"tenant_demo\",\"status\":\"FAILED\",\"error\":\"Rapor oluşturulurken bir hata oluştu.\"}", reportId);
 
         AiReport report = new AiReport();
         report.setId(reportId);
@@ -149,7 +149,7 @@ class AiReportCompletedConsumerTest {
     void consume_processingStatus_updatesReportToProcessing() {
         UUID reportId = UUID.randomUUID();
         String jsonMessage = String.format(
-                "{\"reportId\":\"%s\",\"status\":\"PROCESSING\"}", reportId);
+                "{\"reportId\":\"%s\",\"tenantId\":\"tenant_demo\",\"status\":\"PROCESSING\"}", reportId);
 
         AiReport report = new AiReport();
         report.setId(reportId);
@@ -160,5 +160,38 @@ class AiReportCompletedConsumerTest {
 
         assertEquals(AiReport.ReportStatus.PROCESSING, report.getStatus());
         verify(aiReportRepository).save(report);
+    }
+
+    @Test
+    @DisplayName("tenantId eksi/geçersizse DB'ye hiç gidilmez ve context temizlenir")
+    void consume_missingTenantId_skipsAndClearsContext() {
+        UUID reportId = UUID.randomUUID();
+        String jsonMessage = String.format(
+                "{\"reportId\":\"%s\",\"s3Key\":\"reports/x.md\",\"summary\":\"ok\"}", reportId);
+
+        consumer.consume(jsonMessage);
+
+        verify(aiReportRepository, never()).findById(any(UUID.class));
+        verify(aiReportRepository, never()).save(any());
+        assertEquals(com.learniq.common.tenant.TenantContext.DEFAULT_TENANT,
+                com.learniq.common.tenant.TenantContext.getCurrentTenant());
+    }
+
+    @Test
+    @DisplayName("Tenant'lı akıştan sonra TenantContext temizlenir (consumer thread sızıntı yok)")
+    void consume_validEvent_clearsTenantContext() {
+        UUID reportId = UUID.randomUUID();
+        String jsonMessage = String.format(
+                "{\"reportId\":\"%s\",\"tenantId\":\"tenant_demo\",\"s3Key\":\"reports/x.md\",\"summary\":\"ok\"}", reportId);
+
+        AiReport report = new AiReport();
+        report.setId(reportId);
+        report.setStatus(AiReport.ReportStatus.PENDING);
+        when(aiReportRepository.findById(reportId)).thenReturn(Optional.of(report));
+
+        consumer.consume(jsonMessage);
+
+        assertEquals(com.learniq.common.tenant.TenantContext.DEFAULT_TENANT,
+                com.learniq.common.tenant.TenantContext.getCurrentTenant());
     }
 }

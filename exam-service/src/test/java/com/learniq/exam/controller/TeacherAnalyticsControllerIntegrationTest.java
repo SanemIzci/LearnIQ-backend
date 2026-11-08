@@ -45,6 +45,7 @@ class TeacherAnalyticsControllerIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @MockBean private com.learniq.exam.service.ExamRuleService examRuleService;
     @MockBean private TeacherAnalyticsService teacherAnalyticsService;
 
     // Standard context mock beans to satisfy component scans

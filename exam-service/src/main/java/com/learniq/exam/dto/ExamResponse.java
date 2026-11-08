@@ -19,6 +19,8 @@ public class ExamResponse {
     private String title;
     private LocalDate examDate;
     private String examType;
+    private String status; // OPEN | FINALIZED
+    private LocalDateTime finalizedAt;
     private List<SubjectResponse> subjects;
     @Builder.Default
     private List<UUID> classroomIds = new java.util.ArrayList<>();

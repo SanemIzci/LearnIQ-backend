@@ -2,6 +2,7 @@ package com.learniq.exam.service;
 
 import com.learniq.exam.domain.Exam;
 import com.learniq.exam.domain.StudentExamResult;
+import com.learniq.exam.domain.StudentSubjectResult;
 import com.learniq.exam.domain.Subject;
 import com.learniq.exam.dto.ExamResultSubmitRequest;
 import com.learniq.exam.dto.SubjectInputDto;
@@ -11,14 +12,18 @@ import com.learniq.exam.repository.StudentExamResultRepository;
 import com.learniq.exam.repository.StudentSubjectResultRepository;
 import com.learniq.exam.repository.SubjectRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,6 +31,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,6 +42,7 @@ public class ExamResultServiceTest {
     @Mock private StudentExamResultRepository studentExamResultRepository;
     @Mock private StudentSubjectResultRepository studentSubjectResultRepository;
     @Mock private NetCalculator netCalculator;
+    @Mock private JdbcTemplate jdbcTemplate;
 
     @InjectMocks
     private ExamResultService examResultService;
@@ -54,22 +61,41 @@ public class ExamResultServiceTest {
 
         mockExam = Exam.builder().id(examId).examType("TYT").status(Exam.ExamStatus.OPEN).build();
         mockSubject = Subject.builder().id(subjectId).name("Matematik").build();
+        mockExam.setSubjects(new HashSet<>(List.of(mockSubject)));
+    }
+
+    private SubjectInputDto input(UUID subjectId, int correct, int wrong) {
+        SubjectInputDto input = new SubjectInputDto();
+        input.setSubjectId(subjectId);
+        input.setCorrectCount(correct);
+        input.setWrongCount(wrong);
+        return input;
+    }
+
+    private void stubNoClassroomAssignment() {
+        // Sınav için exam_classrooms kaydı yok → öğrenci doğrudan gönderim yapabilir (fallback akışı)
+        when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), eq(examId)))
+                .thenReturn(0);
+    }
+
+    private void stubClassroomAssignment(boolean enrolled) {
+        when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), eq(examId)))
+                .thenReturn(1);
+        when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), eq(examId), eq(studentId)))
+                .thenReturn(enrolled ? 1 : 0);
     }
 
     @Test
     void submitResult_success_savesSubmittedResult() {
         // Arrange
         ExamResultSubmitRequest request = new ExamResultSubmitRequest();
-        SubjectInputDto input = new SubjectInputDto();
-        input.setSubjectId(subjectId);
-        input.setCorrectCount(30);
-        input.setWrongCount(4);
-        request.setSubjects(List.of(input));
+        request.setSubjects(List.of(input(subjectId, 30, 4)));
 
-        when(examRepository.findById(examId)).thenReturn(Optional.of(mockExam));
+        when(examRepository.findByIdWithSubjects(examId)).thenReturn(Optional.of(mockExam));
         when(subjectRepository.findById(subjectId)).thenReturn(Optional.of(mockSubject));
         when(netCalculator.calculateNetScore(any(), any(), anyInt(), anyInt())).thenReturn(BigDecimal.valueOf(29));
         when(studentExamResultRepository.findByExamIdAndStudentId(examId, studentId)).thenReturn(Optional.empty());
+        stubNoClassroomAssignment();
 
         // Act
         examResultService.submitResult(examId, studentId, request);
@@ -87,13 +113,83 @@ public class ExamResultServiceTest {
     @Test
     void submitResult_examClosed_throwsException() {
         mockExam.setStatus(Exam.ExamStatus.FINALIZED);
-        when(examRepository.findById(examId)).thenReturn(Optional.of(mockExam));
+        when(examRepository.findByIdWithSubjects(examId)).thenReturn(Optional.of(mockExam));
 
         ExamResultSubmitRequest request = new ExamResultSubmitRequest();
 
         assertThatThrownBy(() -> examResultService.submitResult(examId, studentId, request))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Sınav kapalı");
+    }
+
+    @Test
+    @DisplayName("Aynı ders iki kez gönderilirse 400 döner")
+    void submitResult_duplicateSubjectId_throwsBadRequest() {
+        ExamResultSubmitRequest request = new ExamResultSubmitRequest();
+        request.setSubjects(List.of(input(subjectId, 10, 2), input(subjectId, 20, 0)));
+
+        when(examRepository.findByIdWithSubjects(examId)).thenReturn(Optional.of(mockExam));
+
+        assertThatThrownBy(() -> examResultService.submitResult(examId, studentId, request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("birden fazla kez");
+
+        verify(studentExamResultRepository, never()).save(any(StudentExamResult.class));
+    }
+
+    @Test
+    @DisplayName("Sına bağlanmamış ders gönderilirse 400 döner")
+    void submitResult_subjectNotMappedToExam_throwsBadRequest() {
+        UUID unmappedSubjectId = UUID.randomUUID();
+        Subject unmapped = Subject.builder().id(unmappedSubjectId).name("Fizik").build();
+
+        ExamResultSubmitRequest request = new ExamResultSubmitRequest();
+        request.setSubjects(List.of(input(unmappedSubjectId, 10, 2)));
+
+        when(examRepository.findByIdWithSubjects(examId)).thenReturn(Optional.of(mockExam));
+        when(subjectRepository.findById(unmappedSubjectId)).thenReturn(Optional.of(unmapped));
+        stubNoClassroomAssignment();
+        when(studentExamResultRepository.findByExamIdAndStudentId(examId, studentId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> examResultService.submitResult(examId, studentId, request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("sınava bağlı değil");
+
+        verify(studentSubjectResultRepository, never()).save(any(StudentSubjectResult.class));
+        verify(studentExamResultRepository, never()).save(any(StudentExamResult.class));
+    }
+
+    @Test
+    @DisplayName("Sınava atanmış sınıfları olan öğrenciye dahil olmayan öğrenci 403 alır")
+    void submitResult_studentNotInAssignedClassroom_forbidden() {
+        ExamResultSubmitRequest request = new ExamResultSubmitRequest();
+        request.setSubjects(List.of(input(subjectId, 10, 2)));
+
+        when(examRepository.findByIdWithSubjects(examId)).thenReturn(Optional.of(mockExam));
+        stubClassroomAssignment(false);
+
+        assertThatThrownBy(() -> examResultService.submitResult(examId, studentId, request))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("sınıfınıza atanmamış");
+
+        verify(studentSubjectResultRepository, never()).save(any(StudentSubjectResult.class));
+    }
+
+    @Test
+    @DisplayName("Sınıfa atanmış sınava sınıf öğrencisi gönderim yapabilir")
+    void submitResult_studentInAssignedClassroom_succeeds() {
+        ExamResultSubmitRequest request = new ExamResultSubmitRequest();
+        request.setSubjects(List.of(input(subjectId, 30, 4)));
+
+        when(examRepository.findByIdWithSubjects(examId)).thenReturn(Optional.of(mockExam));
+        when(subjectRepository.findById(subjectId)).thenReturn(Optional.of(mockSubject));
+        when(netCalculator.calculateNetScore(any(), any(), anyInt(), anyInt())).thenReturn(BigDecimal.valueOf(29));
+        when(studentExamResultRepository.findByExamIdAndStudentId(examId, studentId)).thenReturn(Optional.empty());
+        stubClassroomAssignment(true);
+
+        examResultService.submitResult(examId, studentId, request);
+
+        verify(studentExamResultRepository).save(any(StudentExamResult.class));
     }
 
     @Test
@@ -140,11 +236,7 @@ public class ExamResultServiceTest {
     @Test
     void submitResult_resubmitAfterRejection_replacesOldResultAndSubjects() {
         ExamResultSubmitRequest request = new ExamResultSubmitRequest();
-        SubjectInputDto input = new SubjectInputDto();
-        input.setSubjectId(subjectId);
-        input.setCorrectCount(30);
-        input.setWrongCount(4);
-        request.setSubjects(List.of(input));
+        request.setSubjects(List.of(input(subjectId, 30, 4)));
 
         StudentExamResult rejected = StudentExamResult.builder()
                 .id(UUID.randomUUID())
@@ -152,12 +244,13 @@ public class ExamResultServiceTest {
                 .status(StudentExamResult.ResultStatus.REJECTED)
                 .build();
 
-        when(examRepository.findById(examId)).thenReturn(Optional.of(mockExam));
+        when(examRepository.findByIdWithSubjects(examId)).thenReturn(Optional.of(mockExam));
         when(studentExamResultRepository.findByExamIdAndStudentId(examId, studentId))
                 .thenReturn(Optional.of(rejected));
         when(subjectRepository.findById(subjectId)).thenReturn(Optional.of(mockSubject));
         when(netCalculator.calculateNetScore(any(), any(), anyInt(), anyInt()))
                 .thenReturn(BigDecimal.valueOf(29));
+        stubNoClassroomAssignment();
 
         examResultService.submitResult(examId, studentId, request);
 
@@ -170,11 +263,7 @@ public class ExamResultServiceTest {
     @Test
     void submitResult_existingApprovedResult_throwsAndDoesNotDelete() {
         ExamResultSubmitRequest request = new ExamResultSubmitRequest();
-        SubjectInputDto input = new SubjectInputDto();
-        input.setSubjectId(subjectId);
-        input.setCorrectCount(30);
-        input.setWrongCount(4);
-        request.setSubjects(List.of(input));
+        request.setSubjects(List.of(input(subjectId, 30, 4)));
 
         StudentExamResult approved = StudentExamResult.builder()
                 .id(UUID.randomUUID())
@@ -182,9 +271,13 @@ public class ExamResultServiceTest {
                 .status(StudentExamResult.ResultStatus.APPROVED)
                 .build();
 
-        when(examRepository.findById(examId)).thenReturn(Optional.of(mockExam));
+        when(examRepository.findByIdWithSubjects(examId)).thenReturn(Optional.of(mockExam));
         when(studentExamResultRepository.findByExamIdAndStudentId(examId, studentId))
                 .thenReturn(Optional.of(approved));
+        stubNoClassroomAssignment();
+        lenient().when(subjectRepository.findById(subjectId)).thenReturn(Optional.of(mockSubject));
+        lenient().when(netCalculator.calculateNetScore(any(), any(), anyInt(), anyInt()))
+                .thenReturn(BigDecimal.valueOf(29));
 
         assertThatThrownBy(() -> examResultService.submitResult(examId, studentId, request))
                 .isInstanceOf(IllegalStateException.class)
@@ -245,7 +338,7 @@ public class ExamResultServiceTest {
 
     @Test
     void submitResult_examNotFound_throwsEntityNotFound() {
-        when(examRepository.findById(examId)).thenReturn(Optional.empty());
+        when(examRepository.findByIdWithSubjects(examId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> examResultService.submitResult(examId, studentId, new ExamResultSubmitRequest()))
                 .isInstanceOf(EntityNotFoundException.class);

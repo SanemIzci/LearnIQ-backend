@@ -351,6 +351,59 @@ paths:
         '409':
           $ref: '#/components/responses/ConflictError'
 
+  /api/v1/exam-rules/{examType}:
+    get:
+      summary: List Net-Calculation Rules for an Exam Type
+      tags: [Exam Rules]
+      description: Lists (examType, subjectId) rules required by net score calculation. ADMIN/TEACHER.
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examType
+          in: path
+          required: true
+          schema: { type: string, example: "TYT" }
+      responses:
+        '200':
+          description: Rules list (may be empty)
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+  /api/v1/exam-rules/{examType}/{subjectId}:
+    put:
+      summary: Create or Update Net-Calculation Rule
+      tags: [Exam Rules]
+      description: |
+        Required before students can submit results for (examType, subjectId).
+        Without a rule, result submission fails with 409. ADMIN/TEACHER.
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: examType
+          in: path
+          required: true
+          schema: { type: string }
+        - name: subjectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExamTypeSubjectRuleRequest'
+      responses:
+        '200':
+          description: Rule stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExamTypeSubjectRuleResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/ForbiddenError'
+
   /api/v1/students/me/exams:
     get:
       summary: List Student's Assigned Exams
@@ -544,6 +597,8 @@ components:
         title: { type: string }
         examDate: { type: string, format: date }
         examType: { type: string }
+        status: { type: string, enum: [OPEN, FINALIZED] }
+        finalizedAt: { type: string, format: date-time, nullable: true }
         subjects:
           type: array
           items:
@@ -555,6 +610,22 @@ components:
           type: array
           items: { type: string, format: uuid }
         createdAt: { type: string, format: date-time }
+
+    ExamTypeSubjectRuleRequest:
+      type: object
+      required: [questionCount]
+      properties:
+        questionCount: { type: integer, minimum: 1, example: 40 }
+        penaltyDivisor: { type: number, description: "Boşsa examType'a göre varsayılan (TYT: 4.0, LGS: 3.0)" }
+
+    ExamTypeSubjectRuleResponse:
+      type: object
+      properties:
+        examType: { type: string, example: "TYT" }
+        subjectId: { type: string, format: uuid }
+        subjectName: { type: string }
+        questionCount: { type: integer }
+        penaltyDivisor: { type: number }
 
     AiReportResponseDto:
       type: object
@@ -569,3 +640,4 @@ components:
         s3Key: { type: string }
         requestedAt: { type: string, format: date-time }
         completedAt: { type: string, format: date-time }
+

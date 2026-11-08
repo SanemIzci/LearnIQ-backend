@@ -46,6 +46,7 @@ class SubjectTopicControllerIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @MockBean private com.learniq.exam.service.ExamRuleService examRuleService;
     @MockBean private SubjectTopicService subjectTopicService;
     @MockBean private com.learniq.exam.service.TeacherAnalyticsService teacherAnalyticsService;
 

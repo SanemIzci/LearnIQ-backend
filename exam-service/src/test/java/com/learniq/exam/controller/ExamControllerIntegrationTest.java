@@ -66,6 +66,7 @@ class ExamControllerIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @MockBean private com.learniq.exam.service.ExamRuleService examRuleService;
     @MockBean private ExamService examService;
     @MockBean private com.learniq.exam.service.ExamFinalizationService examFinalizationService;
     @MockBean private ExamResultService examResultService;

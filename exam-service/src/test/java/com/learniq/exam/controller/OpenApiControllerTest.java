@@ -26,6 +26,7 @@ class OpenApiControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @MockBean private com.learniq.exam.service.ExamRuleService examRuleService;
     @MockBean private com.learniq.exam.service.ExamService examService;
     @MockBean private com.learniq.exam.service.ExamResultService examResultService;
     @MockBean private com.learniq.exam.service.SubjectService subjectService;

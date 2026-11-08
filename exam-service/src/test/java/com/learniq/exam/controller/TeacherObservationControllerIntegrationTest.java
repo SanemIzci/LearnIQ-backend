@@ -40,6 +40,7 @@ class TeacherObservationControllerIntegrationTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
 
+    @MockBean private com.learniq.exam.service.ExamRuleService examRuleService;
     @MockBean private TeacherObservationService observationService;
 
     // ── Standard context mock beans ──────────────────────────────────────────

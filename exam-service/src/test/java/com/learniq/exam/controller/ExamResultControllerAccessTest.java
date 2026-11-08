@@ -19,6 +19,7 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.http.HttpStatus.FORBIDDEN;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -31,6 +32,7 @@ class ExamResultControllerAccessTest {
 
     private ExamResultService examResultService;
     private AccessControlService accessControlService;
+    private StudentExamResultRepository studentExamResultRepository;
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -38,8 +40,9 @@ class ExamResultControllerAccessTest {
     void setUp() {
         examResultService = mock(ExamResultService.class);
         accessControlService = mock(AccessControlService.class);
+        studentExamResultRepository = mock(StudentExamResultRepository.class);
         mockMvc = MockMvcBuilders.standaloneSetup(new ExamResultController(
-                examResultService, mock(StudentExamResultRepository.class), accessControlService)).build();
+                examResultService, studentExamResultRepository, accessControlService)).build();
     }
 
     @Test
@@ -101,5 +104,47 @@ class ExamResultControllerAccessTest {
                 .andExpect(status().isBadRequest());
 
         verify(examResultService, never()).rejectResult(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("GET results - yetkisi doğrulanır (validateExamAccess çağrılır), liste döner")
+    void getResultsByStatus_admin_ok() throws Exception {
+        when(studentExamResultRepository.findByExamIdAndStatus(eq(EXAM_ID), any()))
+                .thenReturn(java.util.List.of());
+
+        mockMvc.perform(get("/api/v1/exams/{examId}/results", EXAM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", TEACHER_ID.toString())
+                        .header("X-User-Role", "ADMIN"))
+                .andExpect(status().isOk());
+
+        verify(accessControlService).validateExamAccess(eq("akademi_1"), eq(TEACHER_ID), eq("ADMIN"), eq(EXAM_ID));
+    }
+
+    @Test
+    @DisplayName("GET results - atanmamış TEACHER 403 alır, repository çağrılmaz")
+    void getResultsByStatus_unassignedTeacher_forbidden() throws Exception {
+        doThrow(new ResponseStatusException(FORBIDDEN, "You do not have access to this exam"))
+                .when(accessControlService)
+                .validateExamAccess(any(), any(), any(), any());
+
+        mockMvc.perform(get("/api/v1/exams/{examId}/results", EXAM_ID)
+                        .header("X-Tenant-Id", "akademi_1")
+                        .header("X-User-Id", TEACHER_ID.toString())
+                        .header("X-User-Role", "TEACHER"))
+                .andExpect(status().isForbidden());
+
+        verify(studentExamResultRepository, never()).findByExamIdAndStatus(any(), any());
+    }
+
+    @Test
+    @DisplayName("GET results - X-Tenant-Id eksikse 400")
+    void getResultsByStatus_missingTenant_badRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/exams/{examId}/results", EXAM_ID)
+                        .header("X-User-Id", TEACHER_ID.toString())
+                        .header("X-User-Role", "ADMIN"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(accessControlService);
     }
 }

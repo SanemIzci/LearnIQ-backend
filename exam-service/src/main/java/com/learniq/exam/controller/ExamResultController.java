@@ -38,14 +38,17 @@ public class ExamResultController {
     @GetMapping
     public ResponseEntity<?> getResultsByStatus(
             @PathVariable UUID examId,
+            @RequestHeader("X-Tenant-Id") String tenantId,
+            @RequestHeader("X-User-Id") String userId,
             @RequestHeader("X-User-Role") String role,
             @RequestParam(defaultValue = "SUBMITTED") StudentExamResult.ResultStatus status,
             @RequestParam(name = "page", required = false) Integer page,
             @RequestParam(name = "size", required = false) Integer size) {
-        
+
         if (!"ADMIN".equals(role) && !"TEACHER".equals(role)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
+        accessControlService.validateExamAccess(tenantId, UUID.fromString(userId), role, examId);
         if (page != null || size != null) {
             int safePage = Math.max(page != null ? page : 0, 0);
             int safeSize = Math.min(Math.max(size != null ? size : 20, 1), 100);

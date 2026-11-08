@@ -310,6 +310,8 @@ public class ExamService {
                 .title(exam.getTitle())
                 .examDate(exam.getExamDate())
                 .examType(exam.getExamType())
+                .status(exam.getStatus() != null ? exam.getStatus().name() : null)
+                .finalizedAt(exam.getFinalizedAt())
                 .subjects(subjectResponses)
                 .classroomIds(classroomIdList)
                 .createdAt(exam.getCreatedAt())

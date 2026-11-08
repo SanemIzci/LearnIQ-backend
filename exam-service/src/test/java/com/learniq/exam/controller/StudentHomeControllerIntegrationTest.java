@@ -34,6 +34,7 @@ class StudentHomeControllerIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @MockBean private com.learniq.exam.service.ExamRuleService examRuleService;
     @MockBean private StudentHomeService studentHomeService;
     
     // Yetersiz WebMvcTest izolasyonu yüzünden gereken MockBean'ler

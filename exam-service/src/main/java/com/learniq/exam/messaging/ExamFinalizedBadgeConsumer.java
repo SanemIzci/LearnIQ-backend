@@ -3,6 +3,8 @@ package com.learniq.exam.messaging;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.learniq.common.tenant.TenantContext;
+import com.learniq.common.tenant.TenantSchemaValidator;
 import com.learniq.exam.service.BadgeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,14 @@ public class ExamFinalizedBadgeConsumer {
             
             if ("EXAM_FINALIZED".equals(eventType)) {
                 String examIdStr = (String) event.get("examId");
+                // Kafka listener thread'lerinde TenantInterceptor çalışmaz; tenant event'ten bağlanmazsa
+                // Hibernate "public" şemasına düşer ve exams bulunamaz (rozetler hiç verilmez).
+                String tenantId = (String) event.get("tenantId");
+                if (!TenantSchemaValidator.isValid(tenantId)) {
+                    log.warn("Geçersiz/eksik tenantId, event atlandı: examId={}, tenantId={}", examIdStr, tenantId);
+                    return;
+                }
+                TenantContext.setCurrentTenant(tenantId);
                 if (examIdStr != null) {
                     UUID examId = UUID.fromString(examIdStr);
                     log.info("ExamFinalizedEvent alındı. Rozetler hesaplanıyor... Sınav ID: {}", examId);
@@ -38,6 +48,8 @@ public class ExamFinalizedBadgeConsumer {
             log.error("Kafka mesajı parse edilemedi: {}", message, e);
         } catch (Exception e) {
             log.error("Rozet değerlendirmesinde hata oluştu: {}", e.getMessage(), e);
+        } finally {
+            TenantContext.clear();
         }
     }
 }
