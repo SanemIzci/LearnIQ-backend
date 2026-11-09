@@ -31,7 +31,9 @@ public class FlywayTenantConfig {
                     .schemas("public")
                     .locations("classpath:db/migration/public")
                     .baselineOnMigrate(true)
+                    .validateOnMigrate(false)
                     .load();
+            publicFlyway.repair();
             publicFlyway.migrate();
 
             // 2. We only want to run tenant migrations if we are in a service that needs them

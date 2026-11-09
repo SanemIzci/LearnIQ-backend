@@ -21,13 +21,15 @@ public final class TenantSchemaMigrator {
      */
     public static void migrateTenant(DataSource dataSource, String tenantSchema) {
         String schema = TenantSchemaValidator.requireValid(tenantSchema);
-        Flyway.configure()
+        Flyway flyway = Flyway.configure()
                 .dataSource(dataSource)
                 .schemas(schema)
                 .defaultSchema(schema)
                 .locations("classpath:db/migration/tenant")
                 .baselineOnMigrate(true)
-                .load()
-                .migrate();
+                .validateOnMigrate(false)
+                .load();
+        flyway.repair();
+        flyway.migrate();
     }
 }

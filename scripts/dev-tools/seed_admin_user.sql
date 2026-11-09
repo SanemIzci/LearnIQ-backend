@@ -11,7 +11,7 @@ VALUES (
     'eeeeeeee-0000-0000-0000-000000000001',
     'akademi_admin',
     -- BCrypt hash of 'Admin@1234'
-    '$2a$12$7v9SYvnWi9grBMJQy6Laze8T3zULQ7bMNgGS8aJsC.Fz1eXovBkS6',
+    '$2a$10$NWuYjalQXSyXaIl3TIJKI.GT9VAYypgzUZuQcSgSF1MZasdik01RW',
     'admin@akademi1.com',
     'Akademi 1 Admin',
     'ADMIN'
