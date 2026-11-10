@@ -113,7 +113,13 @@ public class TenantProvisioningService {
 
     // ── Provisioning ─────────────────────────────────────────────────────────
 
-    @Transactional
+    // Bilinçli olarak @Transactional YAPILMAZ:
+    // Bu metot Flyway (TenantSchemaMigrator) çağırır. Flyway havuzdan bağımsız bir bağlantı açar.
+    // Eğer provisionTenant dış bir Spring transaction'ı içinde koşarsa, CREATE SCHEMA işlemi bu
+    // transaction içinde exclusive kilit alır. Flyway bağımsız bağlantısıyla bu şemaya erişmeye
+    // çalıştığında kilit bekler; dış transaction ise Flyway'in bitmesini beklediği için self-deadlock
+    // oluşur ve thread donar. Hata durumunda rollback mekanizması aşağıdaki catch bloğundaki
+    // cleanupFailedProvisioning() ile açıkça işletilir.
     public CreateTenantResponse provisionTenant(CreateTenantRequest req) {
         if (req.id() == null || req.name() == null || req.name().isBlank()
                 || req.adminUsername() == null || req.adminUsername().isBlank()) {
