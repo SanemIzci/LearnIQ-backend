@@ -55,4 +55,37 @@ public class SubjectController {
     public ResponseEntity<SubjectResponse> getSubject(@PathVariable UUID subjectId) {
         return ResponseEntity.ok(subjectService.getSubjectById(subjectId));
     }
+
+    /**
+     * PUT /api/v1/subjects/{subjectId}
+     * Updates an existing subject's name within the current tenant.
+     */
+    @PutMapping("/{subjectId}")
+    public ResponseEntity<SubjectResponse> updateSubject(@PathVariable UUID subjectId,
+                                                         @Valid @RequestBody SubjectRequest request,
+                                                         @RequestHeader(value = "X-User-Role", required = false) String role) {
+        if (role == null || role.isBlank()
+                || !"ADMIN".equals(role) && !"SUPER_ADMIN".equals(role) && !"TEACHER".equals(role)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Only teachers and administrators can update subjects.");
+        }
+        SubjectResponse response = subjectService.updateSubject(subjectId, request);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * DELETE /api/v1/subjects/{subjectId}
+     * Deletes a subject within the current tenant.
+     */
+    @DeleteMapping("/{subjectId}")
+    public ResponseEntity<Void> deleteSubject(@PathVariable UUID subjectId,
+                                              @RequestHeader(value = "X-User-Role", required = false) String role) {
+        if (role == null || role.isBlank()
+                || !"ADMIN".equals(role) && !"SUPER_ADMIN".equals(role) && !"TEACHER".equals(role)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Only teachers and administrators can delete subjects.");
+        }
+        subjectService.deleteSubject(subjectId);
+        return ResponseEntity.noContent().build();
+    }
 }

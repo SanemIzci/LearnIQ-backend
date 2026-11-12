@@ -66,6 +66,39 @@ public class SubjectService {
         return toResponse(subject);
     }
 
+    /**
+     * Updates an existing subject's name in the current tenant's schema.
+     */
+    @Transactional
+    public SubjectResponse updateSubject(UUID subjectId, SubjectRequest request) {
+        Subject subject = subjectRepository.findById(subjectId)
+                .orElseThrow(() -> new EntityNotFoundException("Subject", subjectId));
+
+        if (!subject.getName().equalsIgnoreCase(request.getName())
+                && subjectRepository.existsByNameIgnoreCase(request.getName())) {
+            throw new DataIntegrityViolationException(
+                    "Subject with name '" + request.getName() + "' already exists in this tenant.");
+        }
+
+        subject.setName(request.getName());
+        Subject saved = subjectRepository.save(subject);
+        log.info("Updated subject '{}' with id={}", saved.getName(), saved.getId());
+
+        return toResponse(saved);
+    }
+
+    /**
+     * Deletes a subject in the current tenant's schema.
+     */
+    @Transactional
+    public void deleteSubject(UUID subjectId) {
+        Subject subject = subjectRepository.findById(subjectId)
+                .orElseThrow(() -> new EntityNotFoundException("Subject", subjectId));
+
+        subjectRepository.delete(subject);
+        log.info("Deleted subject '{}' with id={}", subject.getName(), subject.getId());
+    }
+
     // ── Mapping ────────────────────────────────────────────────────────────────
 
     private SubjectResponse toResponse(Subject subject) {
